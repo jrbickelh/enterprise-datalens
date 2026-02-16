@@ -1,0 +1,15 @@
+# Secrets
+.env
+
+# Python & OS Junk
+__pycache__/
+*.pyc
+.DS_Store
+
+# Virtual Environment (Crucial: Never upload this)
+.venv/
+venv/
+
+# Local Data (We generate this on the fly, don't upload binary DBs)
+banking_warehouse.db
+chroma_db/
