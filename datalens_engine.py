@@ -7,6 +7,10 @@ import pandas as pd
 from datetime import datetime
 import sys
 import argparse
+import lancedb
+from sentence_transformers import SentenceTransformer
+import os
+
 
 # --- CONFIGURATION ---
 LAKEHOUSE_PATH = "./lakehouse/transactions"
@@ -39,81 +43,103 @@ def format_history_table():
 
     return pd.DataFrame(audit_data)
 
-def generate_sql(user_prompt):
-    system_instruction = f"""
-    You are a strict SQL translation engine.
-    1. OUTPUT ONLY THE SQL.
-    2. DO NOT include markdown, backticks, or explanations.
-    3. DO NOT include labels like 'SQL:' or 'User Question:'.
-    4. TABLE: Use 'delta_scan('{LAKEHOUSE_PATH}')' as the source.
-    5. VERSIONING: If asked for 'version X', output exactly:
-       'delta_scan('{LAKEHOUSE_PATH}', version=X)'
-       Replace X with the actual integer number.
-    """
+def generate_sql(user_input):
+    """Translates natural language to SQL using Semantic Context + Local LLM."""
 
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": f"{system_instruction}\n\nUser Question: {user_prompt}\nSQL:",
-        "stream": False,
-        "options": {
-            "stop": ["User Question:", "\n\n", "SQL:", "User:"] # Stop the model from hallucinating the next turn
-        }
-    }
+    # 1. Get the 'Knowledge' from our Vector Store
+    semantic_context = get_relevant_columns(user_input)
 
+    # 2. Construct a 'System Prompt' that enforces strict SQL output
+    prompt = f"""<|system|>
+    You are a DuckDB SQL Expert.
+    - Table Name: 'transactions'
+    - Task: Generate ONLY valid SQL. Do not explain anything.
+    - Case Sensitivity: Use 'ILIKE' for all string comparisons (e.g., status ILIKE 'pending').
+    - Null Handling: Use COALESCE(SUM(amount), 0) to avoid 'NaN' or NULL results.
+
+    SCHEMA:
+    {semantic_context}
+
+    EXAMPLES:
+    User: total cash?
+    SQL: SELECT COALESCE(SUM(amount), 0) FROM transactions;<|end|>
+    <|user|>
+    {user_input}<|end|>
+    <|assistant|>
+    SQL:"""
+
+    # 3. Call Local LLM (Assuming Ollama is running)
     try:
-        response = requests.post(OLLAMA_URL, json=payload)
-        raw_sql = response.json()['response'].strip()
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": "phi3", # Or llama3
+                "prompt": prompt,
+                "stream": False
+            }
+        )
 
-        # --- LEAD ENGINEER SANITIZATION ---
-        # 1. Strip Markdown
-        clean_sql = re.sub(r'```sql\n?|```', '', raw_sql).strip()
+        raw_sql = response.json().get("response", "").strip()
 
-        # 2. Hard Truncation: Split at any known hallucination markers just in case
-        for marker in ["User Question:", "SQL:", "User:"]:
-            clean_sql = clean_sql.split(marker)[0].strip()
+        # 1. Strip Markdown code blocks
+        clean_sql = raw_sql.replace("```sql", "").replace("```", "").strip()
 
-        # 3. Clean trailing punctuation
-        clean_sql = clean_sql.rstrip(';')
+        # 2. Strip the 'SQL:' prefix if the model included it
+        if clean_sql.upper().startswith("SQL:"):
+            clean_sql = clean_sql[4:].strip()
+
+        # 3. Take only the first query (in case it halluncinated a second one)
+        clean_sql = clean_sql.split(";")[0] + ";"
 
         return clean_sql
+
     except Exception as e:
-        return f"Error connecting to local LLM: {e}"
+        return f"-- Error generating SQL: {str(e)}"
 
 def execute_query(sql_query):
-    """
-    LEAD FIX: Using .file_uris() to resolve absolute physical paths
-    for DuckDB versioned scans.
-    """
-    con = duckdb.connect()
+    """Registers the Delta table as a DuckDB view and executes the query."""
     try:
-        # 1. FUZZY SEARCH: Catch 'version=X' OR just ', X' or even just the version number
-        version_match = re.search(r"delta_scan\(.*?,?\s*(?:version\s*=\s*)?(\d+)\)", sql_query)
+        # 1. Point to your lakehouse folder
+        dt = DeltaTable("./lakehouse/transactions")
 
-        if version_match:
-            version_id = int(version_match.group(1))
-            print(f"--> Intercepting Time Travel: Resolving Version {version_id}")
+        # 2. Get the file URIs (The magic that lets DuckDB read Delta)
+        # We'll use the DeltaTable's underlying dataset to get the files
+        dataset = dt.to_pyarrow_dataset()
 
-            dt = DeltaTable(LAKEHOUSE_PATH)
-            dt.load_as_version(version_id)
+        # 3. Create a connection and register the view
+        con = duckdb.connect()
+        con.register("transactions", dataset)
 
-            # FIXED: file_uris() provides the absolute paths DuckDB needs
-            files = dt.file_uris()
-
-            # Swap the delta_scan call for a direct parquet read
-            sql_query = re.sub(
-                r"delta_scan\(['\"].+?['\"].*?\)",
-                f"read_parquet({files})",
-                sql_query
-            )
-
-        # 2. Final Clean-up: If the model ONLY output the delta_scan without SELECT
-        if not sql_query.upper().startswith("SELECT") and "read_parquet" in sql_query:
-            sql_query = f"SELECT * FROM {sql_query}"
-
+        # 4. Execute and return results
         result = con.execute(sql_query).df()
         return result
     except Exception as e:
         return f"Execution Error: {e}"
+
+def get_relevant_columns(user_query):
+    # Use absolute paths to avoid .venv confusion
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    db_path = os.path.join(project_root, "lancedb")
+
+    if not os.path.exists(db_path):
+        return "- amount: value\n- status: Pending, Active, or Closed"
+
+    try:
+        db = lancedb.connect(db_path)
+        # Use the modern list_tables() method
+        if "column_metadata" not in db.list_tables():
+            return "- amount: value\n- status: Pending, Active, or Closed"
+
+        tbl = db.open_table("column_metadata")
+
+        model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
+
+        query_vector = model.encode(user_query).tolist()
+        results = tbl.search(query_vector).limit(3).to_pandas()
+
+        return "\n".join([f"- {row['column']}: {row['description']}" for _, row in results.iterrows()])
+    except Exception as e:
+        return f"- amount: value\n- status: status (Error: {e})"
 
 if __name__ == "__main__":
     # 1. Setup Argument Parser for CI/Headless Mode
