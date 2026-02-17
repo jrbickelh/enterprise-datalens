@@ -87,11 +87,11 @@ fluent_datasources:
     assets:
       transactions:
         type: dataframe
-        id: 74c2bb3e-26d7-427f-a484-574fc0d6f3b9
+        id: 4ed9ea16-314a-46e9-9605-a59bc719e6eb
         batch_metadata: {}
         batch_definitions:
           all_data:
-            id: e94a8145-8919-4c0f-b95d-2dbf59b1dc15
+            id: a4b521ed-1ce5-4d87-b27a-7229e347bfe6
             partitioner:
 analytics_enabled:
 data_context_id: 0ffb5a0c-5192-4d0a-9b04-21ddd6212c7a
