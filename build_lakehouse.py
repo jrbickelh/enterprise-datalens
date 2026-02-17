@@ -1,61 +1,99 @@
+import os
 import pandas as pd
 import numpy as np
-from deltalake.writer import write_deltalake
+from deltalake import DeltaTable, write_deltalake
 import duckdb
-import os
-import shutil
+import great_expectations as gx
+from gx_config import get_documented_suite
 
-# --- Configuration ---
-LAKEHOUSE_PATH = "./lakehouse"
-TRANSACTIONS_PATH = f"{LAKEHOUSE_PATH}/transactions"
-CUSTOMERS_PATH = f"{LAKEHOUSE_PATH}/customers"
-DUCKDB_FILE = "lakehouse_serving.duckdb"
+# --- CONFIGURATION ---
+LAKEHOUSE_PATH = "./lakehouse/transactions"
+DUCKDB_PATH = "lakehouse_serving.duckdb"
 
-def clean_existing_lakehouse():
-    print("-> Cleaning existing lakehouse artifacts...")
-    if os.path.exists(LAKEHOUSE_PATH):
-        shutil.rmtree(LAKEHOUSE_PATH)
-    if os.path.exists(DUCKDB_FILE):
-        os.remove(DUCKDB_FILE)
+def generate_banking_data(n=1000):
+    """Generates synthetic banking data for the lakehouse."""
+    print(f"--> Generating {n} synthetic banking records...")
+    data = {
+        "transaction_id": [f"TXN-{i:06d}" for i in range(n)],
+        "customer_id": [f"CUST-{np.random.randint(1000, 9999)}" for _ in range(n)],
+        "amount": np.round(np.random.uniform(5.0, 5000.0, n), 2),
+        "status": np.random.choice(["Active", "Inactive"], n, p=[0.9, 0.1]),
+        "timestamp": pd.date_range(start="2025-01-01", periods=n, freq="h")
+    }
+    return pd.DataFrame(data)
 
-def generate_mock_data():
-    print("-> Generating synthetic banking data...")
-    # Customers
-    customers = pd.DataFrame({
-        "customer_id": range(1, 101),
-        "name": [f"Customer_{i}" for i in range(1, 101)],
-        "status": np.random.choice(["Active", "Inactive", "Pending"], 100, p=[0.7, 0.2, 0.1]),
-        "signup_date": pd.to_datetime("2025-01-01") + pd.to_timedelta(np.random.randint(0, 365, 100), unit='D')
-    })
-    # Transactions
-    transactions = pd.DataFrame({
-        "transaction_id": range(1, 1001),
-        "customer_id": np.random.randint(1, 101, 1000),
-        "amount": np.round(np.random.uniform(10.0, 5000.0, 1000), 2),
-        "timestamp": pd.to_datetime("2025-01-01") + pd.to_timedelta(np.random.randint(0, 365, 1000), unit='D')
-    })
-    return customers, transactions
+def build_delta_tables(df):
+    """Writes the dataframe to a local Delta Lake."""
+    print(f"--> Writing data to Delta Lake at: {LAKEHOUSE_PATH}")
+    write_deltalake(LAKEHOUSE_PATH, df, mode="overwrite")
 
-def build_delta_tables(customers, transactions):
-    print(f"-> Writing Delta tables to {LAKEHOUSE_PATH}...")
-    os.makedirs(LAKEHOUSE_PATH, exist_ok=True)
-    write_deltalake(CUSTOMERS_PATH, customers)
-    write_deltalake(TRANSACTIONS_PATH, transactions)
-    print("   [OK] Delta Lake Storage Layer Materialized.")
+def validate_lakehouse_data():
+    print("--> Commencing Professional Data Quality Validation...")
+    
+    # CHANGE: Initialize a permanent local context instead of an ephemeral one
+    # This creates the /gx folder structure in your current directory
+    context = gx.get_context(project_root_dir="./")
+    
+    # 1. Get the actual Suite OBJECT
+    suite = get_documented_suite(context)
+    
+    # 2. Load the data
+    dt = DeltaTable(LAKEHOUSE_PATH)
+    pandas_df = dt.to_pandas()
+    
+    # 3. Fluent API Batch Setup
+    datasource = context.data_sources.add_or_update_pandas(name="delta_delivery")
+    data_asset = datasource.add_dataframe_asset(name="transactions")
+    
+    # Define the batch
+    batch_definition = data_asset.add_batch_definition_whole_dataframe("all_data")
+    batch = batch_definition.get_batch(batch_parameters={"dataframe": pandas_df})
+    
+    # 4. Validate using the object
+    print(f"--> Validating batch against suite: {suite.name}...")
+    results = batch.validate(suite)
+    
+    # 5. Build the Docs (This now saves them to your disk)
+    print("--> Generating permanent Data Docs...")
+    context.build_data_docs()
+    
+    # NEW: Automatically open the docs at the end of the run
+    context.open_data_docs()
+    
+    return results.success
 
 def initialize_duckdb_catalog():
-    print(f"-> Initializing DuckDB serving layer: {DUCKDB_FILE}...")
-    con = duckdb.connect(DUCKDB_FILE)
-    con.execute("INSTALL delta; LOAD delta;") # Critical for reading Delta files
-    con.execute(f"CREATE VIEW customers AS SELECT * FROM delta_scan('{CUSTOMERS_PATH}')")
-    con.execute(f"CREATE VIEW transactions AS SELECT * FROM delta_scan('{TRANSACTIONS_PATH}')")
-    print("   [OK] DuckDB Catalog Synced with Delta Lake.")
+    """Mounts the Delta Lake tables as views in DuckDB for sub-second querying."""
+    print(f"--> Promoting to Serving Layer: {DUCKDB_PATH}")
+    con = duckdb.connect(DUCKDB_PATH)
+    
+    # Create a view that points directly to the Delta Parquet files
+    con.execute(f"""
+        CREATE OR REPLACE VIEW transactions AS 
+        SELECT * FROM delta_scan('{LAKEHOUSE_PATH}')
+    """)
+    
+    print(f"✅ Serving Layer Online. View 'transactions' registered.")
     con.close()
 
 if __name__ == "__main__":
-    print("=== ENTERPRISE DATALENS | LAKEHOUSE BUILDER v3.5 ===")
-    clean_existing_lakehouse()
-    c, t = generate_mock_data()
-    build_delta_tables(c, t)
-    initialize_duckdb_catalog()
-    print("=== SUCCESS: Lakehouse Ready ===")
+    print("============================================================")
+    print("   ENTERPRISE DATALENS v3.5 | LAKEHOUSE BUILDER")
+    print("============================================================")
+    
+    # 1. Ingestion
+    raw_data = generate_banking_data(5000)
+    build_delta_tables(raw_data)
+    
+    # 2. Quality Gate (The Lead Scientist Step)
+    quality_passed = validate_lakehouse_data()
+    
+    if quality_passed:
+        # 3. Serving Layer Promotion
+        print("✅ DATA QUALITY PASSED. Updating analytical catalog...")
+        initialize_duckdb_catalog()
+        print("\nBuild Complete. Ready for Neural Queries.")
+    else:
+        print("\n❌ DATA QUALITY FAILURE: Check Data Docs in bx/uncommitted/data_docs/")
+        print("Serving Layer update aborted to prevent corruption.")
+        exit(1)

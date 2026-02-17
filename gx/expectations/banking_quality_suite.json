@@ -1,0 +1,45 @@
+{
+  "expectations": [
+    {
+      "id": "dac9a80c-1223-4b60-9da7-49bdb0026aea",
+      "kwargs": {
+        "column": "transaction_id"
+      },
+      "meta": {},
+      "notes": "Unique identifier for each banking transaction. Primary Key.",
+      "severity": "critical",
+      "type": "expect_column_values_to_not_be_null"
+    },
+    {
+      "id": "359be398-1628-4b8f-a2e2-ff914b2fd892",
+      "kwargs": {
+        "column": "amount",
+        "min_value": 0.0
+      },
+      "meta": {},
+      "notes": "The monetary value of the transaction in USD. Must be positive.",
+      "severity": "critical",
+      "type": "expect_column_values_to_be_between"
+    },
+    {
+      "id": "496168a3-2e7a-458c-8b36-10e4bb0870ee",
+      "kwargs": {
+        "column": "status",
+        "value_set": [
+          "Active",
+          "Inactive"
+        ]
+      },
+      "meta": {},
+      "notes": "Current state of the customer account (Active/Inactive).",
+      "severity": "critical",
+      "type": "expect_column_values_to_be_in_set"
+    }
+  ],
+  "id": "83bc07c1-ddd2-49c4-a4b0-1b8962b83de2",
+  "meta": {
+    "great_expectations_version": "1.12.3"
+  },
+  "name": "banking_quality_suite",
+  "notes": null
+}

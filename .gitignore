@@ -1,17 +1,47 @@
-# --- Security & Env ---
-.env
-.venv/
-__pycache__/
-*.pyc
+# ============================================================
+# DATALENS ENTERPRISE .GITIGNORE (v4.0 Ready)
+# ============================================================
 
-# --- Data & Lakehouse (CRITICAL: Do not push these) ---
+# --- Core Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+dist/
+build/
+*.egg-info/
+
+# --- Data & Storage (The Lakehouse) ---
+# We keep the code, but never the heavy data files
 lakehouse/
 *.duckdb
-*.wal
+*.duckdb.wal
+*.log
+*.csv
 *.parquet
-_delta_log/
 
-# --- Tools & OS ---
-bin/
-.github/workflows/bin/
+# --- Great Expectations (GX) ---
+# Keep the logic (expectations/ & .yml), ignore the results (uncommitted/)
+gx/uncommitted/
+gx/checkpoints/
+gx/expectations/.ge_store_backend_id
+gx/plugins/
+
+# --- v4.0 Semantic Layer (LanceDB & Embeddings) ---
+# Vector databases and local model caches are too heavy for Git
+lancedb/
+.cache/
+models/
+embeddings/
+
+# --- Environment & OS ---
+.env
 .DS_Store
+.idea/
+.vscode/
+
+# --- Project Artifacts ---
+# Keep pyproject.toml and uv.lock, but ignore temporary test artifacts
+test_results/

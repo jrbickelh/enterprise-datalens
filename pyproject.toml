@@ -1,0 +1,23 @@
+[project]
+name = "datalens"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Jordan Bickelhaupt", email = "jrbickelh@gmail.com" }
+]
+requires-python = ">=3.12.8"
+dependencies = [
+    "deltalake>=1.4.2",
+    "duckdb>=1.4.4",
+    "great-expectations>=1.12.3",
+    "lancedb>=0.29.2",
+    "numpy>=2.4.2",
+    "pandas>=2.3.3",
+    "pyarrow>=23.0.1",
+    "sentence-transformers>=5.2.3",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.26,<0.10.0"]
+build-backend = "uv_build"

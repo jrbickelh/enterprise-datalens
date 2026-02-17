@@ -18,11 +18,16 @@ jobs:
       with:
         python-version: "3.11"
         
-    - name: Install Dependencies
+    - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+
+        # 1. Install packages (skipping the project build to avoid src/ error)
+        uv sync --frozen --no-install-project --all-extras
+
+        # 2. CRITICAL FIX: Add the .venv to the path for the rest of the job
+        echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
     - name: E2E Smoke Test
       run: |
         # 1. Build the Lakehouse (Generates data and DuckDB file)
