@@ -33,9 +33,7 @@ Built to simulate a high-scale financial analytics platform, DataLens enables:
 SELECT COALESCE(SUM(amount), 0) as total_pending 
 FROM transactions 
 WHERE status ILIKE 'pending';
-```
 
-```
 +-------------------+
 |   total_pending   |
 +-------------------+
@@ -57,9 +55,7 @@ WHERE status ILIKE 'pending';
 ```sql
 -- Time Travel Query
 SELECT count(*) FROM transactions VERSION AS OF 0;
-```
 
-```
 +-------+
 | count |
 +-------+
