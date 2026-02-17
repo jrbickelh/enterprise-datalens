@@ -15,6 +15,59 @@ Built to simulate a high-scale financial analytics platform, DataLens enables:
 - Fast, in-process analytical querying  
 
 ---
+### Scenario 1: The "Fuzzy" Business Question
+
+**You ask:**
+> *"How much money is pending right now?"*
+
+**The Engine (v4.0) reacts:**
+
+1. **Semantic Search:** Scans the Data Dictionary and realizes "money" maps to the `amount` column and "pending" is a value in the `status` column.
+2. **Neural Translation:** The local LLM (Phi-3) writes the optimized SQL.
+3. **Execution:** DuckDB runs the query against the Delta Lake.
+
+**The Output:**
+
+```sql
+-- Generated automatically by Neural Engine
+SELECT COALESCE(SUM(amount), 0) as total_pending 
+FROM transactions 
+WHERE status ILIKE 'pending';
+```
+
+```
++-------------------+
+|   total_pending   |
++-------------------+
+|    $42,530.00     |
++-------------------+
+```
+
+---
+
+### Scenario 2: Time Travel (Audit & Compliance)
+
+**You ask:**
+> *"What did the transaction count look like yesterday (Version 0)?"*
+
+**The Engine reacts:** It recognizes the intent to query historical data without needing to restore a backup.
+
+**The Output:**
+
+```sql
+-- Time Travel Query
+SELECT count(*) FROM transactions VERSION AS OF 0;
+```
+
+```
++-------+
+| count |
++-------+
+|  500  |  <-- Result from the past (Current count is 505)
++-------+
+```
+
+---
 
 ## 🏗 Architecture
 
@@ -44,10 +97,10 @@ graph TD
 |--------------------|----------------------|-------------|
 | Temporal Querying  | delta-rs             | Query historical versions of data with zero duplication (Time Travel). |
 | Semantic Search    | LanceDB              | Vector-based schema discovery enabling fuzzy, natural-language queries. |
+| Schema Enforcement | Delta Lake           | Strict type-checking and metadata validation to prevent data corruption. |
 | Data Quality       | Great Expectations   | Automated validation gates preventing bad data from entering the lake. |
 | Compute Engine     | DuckDB               | In-process OLAP engine delivering sub-second analytics on Parquet. |
 | CI/CD Pipeline     | GitHub Actions       | Automated lakehouse builds and end-to-end query tests on every push. |
-
 ---
 
 ## 🚀 Getting Started
@@ -56,8 +109,9 @@ This project uses **uv** for fast dependency resolution and deterministic enviro
 
 ### Prerequisites
 
-- Python **3.11+**
-- **uv** (recommended) or pip
+- **Python 3.11+**
+- **uv** (recommended) or **pip**
+- **[Ollama](https://ollama.com/)** (running `phi3` or `llama3`) for local LLM inference
 
 ---
 
@@ -66,7 +120,7 @@ This project uses **uv** for fast dependency resolution and deterministic enviro
 Clone the repository:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/enterprise-datalens.git
+git clone https://github.com/jrbickelh/enterprise-datalens.git
 cd enterprise-datalens
 ```
 

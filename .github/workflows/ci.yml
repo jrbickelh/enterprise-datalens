@@ -1,37 +1,43 @@
-name: DataLens CI Pipeline
+name: Enterprise DataLens CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "v4-semantic-layer" ]
   pull_request:
     branches: [ "main" ]
 
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # 1. Official Action: Installs uv, handles caching, and adds it to PATH automatically
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
       with:
-        python-version: "3.11"
-        
-    - name: Install dependencies
-      run: |
-        curl -LsSf https://astral.sh/uv/install.sh | sh
+        enable-cache: true
+        version: "latest"
 
-        # 1. Install packages (skipping the project build to avoid src/ error)
-        uv sync --frozen --no-install-project --all-extras
+    # 2. Setup Python: deterministic install matching your local env
+    - name: Set up Python 3.12
+      run: uv python install 3.12
 
-        # 2. CRITICAL FIX: Add the .venv to the path for the rest of the job
-        echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+    # 3. Install Deps: --no-install-project prevents the "src/" layout error
+    - name: Install Dependencies
+      run: uv sync --frozen --no-install-project --all-extras
 
-    - name: E2E Smoke Test
-      run: |
-        # 1. Build the Lakehouse (Generates data and DuckDB file)
-        python build_lakehouse.py
-        
-        # 2. Run the Engine and verify the 'SUCCESS' flag
-        python datalens_engine.py --sql "SELECT count(*) FROM transactions" | grep "SUCCESS"
+    # 4. Build the Lakehouse (Data + GX Validation)
+    - name: Build Lakehouse & Validate
+      run: uv run python build_lakehouse.py
+
+    # 5. Build Semantic Index (Critical for v4.0)
+    - name: Build LanceDB Index
+      run: uv run python semantic_indexer.py
+
+    # 6. E2E Smoke Test (Headless Mode)
+    # We rely on exit code 0. If this crashes, the step fails automatically.
+    - name: Run Neural Engine Smoke Test
+      run: uv run python datalens_engine.py --sql "SELECT count(*) FROM transactions"

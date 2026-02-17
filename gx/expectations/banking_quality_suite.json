@@ -1,7 +1,7 @@
 {
   "expectations": [
     {
-      "id": "ea1266d3-459a-4d57-b932-3df876d2f63d",
+      "id": "702e1da3-d94e-4202-aa4d-fab8cfd65339",
       "kwargs": {
         "column": "transaction_id"
       },
@@ -11,7 +11,7 @@
       "type": "expect_column_values_to_not_be_null"
     },
     {
-      "id": "549ddfd3-fd1e-4cd2-bf08-f572a8ec4e68",
+      "id": "df7a5ec2-c259-49bf-a640-4d80c8bae4ed",
       "kwargs": {
         "column": "amount",
         "min_value": 0.0
@@ -22,7 +22,7 @@
       "type": "expect_column_values_to_be_between"
     },
     {
-      "id": "453ec8fa-19bb-4ef9-b503-6f5a58a17418",
+      "id": "03d4246a-3cf8-49eb-8c2d-d72de77815a0",
       "kwargs": {
         "column": "status",
         "value_set": [
