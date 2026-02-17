@@ -1,15 +1,17 @@
-# Secrets
+# --- Security & Env ---
 .env
-
-# Python & OS Junk
+.venv/
 __pycache__/
 *.pyc
+
+# --- Data & Lakehouse (CRITICAL: Do not push these) ---
+lakehouse/
+*.duckdb
+*.wal
+*.parquet
+_delta_log/
+
+# --- Tools & OS ---
+bin/
+.github/workflows/bin/
 .DS_Store
-
-# Virtual Environment (Crucial: Never upload this)
-.venv/
-venv/
-
-# Local Data (We generate this on the fly, don't upload binary DBs)
-banking_warehouse.db
-chroma_db/
