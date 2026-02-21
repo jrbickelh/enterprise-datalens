@@ -12,10 +12,17 @@ dependencies = [
     "duckdb>=1.4.4",
     "great-expectations>=1.12.3",
     "lancedb>=0.29.2",
+    "langchain>=1.2.10",
+    "langchain-experimental>=0.4.1",
+    "langchain-openai>=1.1.10",
+    "langsmith>=0.7.5",
     "numpy>=2.4.2",
     "pandas>=2.3.3",
+    "plotly>=6.5.2",
     "pyarrow>=23.0.1",
+    "python-dotenv>=1.2.1",
     "sentence-transformers>=5.2.3",
+    "streamlit>=1.54.0",
 ]
 
 [build-system]
@@ -23,3 +30,8 @@ requires = ["uv_build>=0.9.26,<0.10.0"]
 build-backend = "uv_build"
 [tool.uv]
 package = false
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.2",
+]

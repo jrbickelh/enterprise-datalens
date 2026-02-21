@@ -1,5 +1,5 @@
 # ============================================================
-# DATALENS ENTERPRISE .GITIGNORE (v4.0 Final)
+# DATALENS: THE REACT LAKEHOUSE AGENT .GITIGNORE
 # ============================================================
 
 # --- Core Python & Environments ---
@@ -11,22 +11,23 @@ __pycache__/
 .env
 
 # --- Data & Storage (The Lakehouse) ---
-# We keep the logic, but never the heavy data artifacts
+# Ignoring entire directories and local DB artifacts
 lakehouse/
 lancedb/
 data/
 _delta_log/
-*.duckdb
-*.duckdb.wal
+*.db*
+*.duckdb*
+*.wal
 *.log
 *.csv
 *.parquet
 
 # --- Great Expectations (GX) ---
-# Keep expectations/ and checkpoints/; ignore runtime results
+# Keep logic, ignore runtime results
 gx/uncommitted/
 
-# --- v4.0 Semantic Layer & AI ---
+# --- Semantic Layer & AI Cache ---
 .cache/
 models/
 embeddings/

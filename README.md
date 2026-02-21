@@ -1,211 +1,169 @@
-# Enterprise DataLens v4.0 | Neural Temporal Lakehouse
+# 🔭 DataLens: ReAct Lakehouse Agent
 
 ![CI Status](https://github.com/jrbickelh/enterprise-datalens/actions/workflows/ci.yml/badge.svg)
-![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
-![DuckDB](https://img.shields.io/badge/DuckDB-Powered-yellow)
-![Delta Lake](https://img.shields.io/badge/Storage-Delta%20Lake-orange)
+![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)
+![DuckDB](https://img.shields.io/badge/DuckDB-Lakehouse-F5DF4D?style=flat)
+![Azure OpenAI](https://img.shields.io/badge/Azure_OpenAI-GPT--4o-0089D6?style=flat&logo=microsoftazure&logoColor=white)
+![LangChain](https://img.shields.io/badge/LangChain-ReAct_Agent-1C3C3C?style=flat)
+![Streamlit](https://img.shields.io/badge/Streamlit-UI-FF4B4B?style=flat&logo=streamlit&logoColor=white)
+![uv](https://img.shields.io/badge/uv-Package_Manager-purple?style=flat)
+![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
 
-**Enterprise DataLens** is a **local-first Lakehouse engine** showcasing modern data engineering patterns by unifying **ACID storage, time travel, data quality enforcement, and semantic vector search** behind a single query interface.
+DataLens is an autonomous analytics agent built on the **ReAct (Reasoning and Acting)** framework. It bridges the gap between a local DuckDB Lakehouse and a dynamic Python/Plotly Sandbox, allowing users to perform complex data extraction, statistical forecasting, and dynamic visualization entirely through natural language.
 
-Built to simulate a high-scale financial analytics platform, DataLens enables:
-
-- Natural language queries translated into SQL  
-- Historical “time travel” queries across dataset versions  
-- Automated data validation at ingestion  
-- Fast, in-process analytical querying  
-
----
-### Scenario 1: The "Fuzzy" Business Question
-
-**You ask:**
-> *"How much money is pending right now?"*
-
-**The Engine (v4.0) reacts:**
-
-1. **Semantic Search:** Scans the Data Dictionary and realizes "money" maps to the `amount` column and "pending" is a value in the `status` column.
-2. **Neural Translation:** The local LLM (Phi-3) writes the optimized SQL.
-3. **Execution:** DuckDB runs the query against the Delta Lake.
-
-**The Output:**
-
-```sql
--- Generated automatically by Neural Engine
-SELECT COALESCE(SUM(amount), 0) as total_pending 
-FROM transactions 
-WHERE status ILIKE 'pending';
-```
-
-```
-+-------------------+
-|   total_pending   |
-+-------------------+
-|    $42,530.00     |
-+-------------------+
-```
+> Unlike standard text-to-SQL wrappers, DataLens is a **multi-step orchestration engine** capable of self-correcting syntax errors, executing multi-line Python calculations on extracted data, and preventing LLM context-window exhaustion.
 
 ---
 
-### Scenario 2: Time Travel (Audit & Compliance)
+## 🚀 The Agent in Action
 
-**You ask:**
-> *"What did the transaction count look like yesterday (Version 0)?"*
+The agent doesn't just write queries — it chains tools together to solve multi-step business problems and visualizes results dynamically.
 
-**The Engine reacts:** It recognizes the intent to query historical data without needing to restore a backup.
+### Example 1: Regional Revenue Breakdown
 
-**The Output:**
+**User Prompt:**
+> "Show me a bar chart of our total revenue broken down by region for all successful transactions"
 
-```sql
--- Time Travel Query
-SELECT count(*) FROM transactions VERSION AS OF 0;
-```
+**Agent Chain of Thought:**
 
-```
-+-------+
-| count |
-+-------+
-|  500  |  <-- Result from the past (Current count is 505)
-+-------+
-```
+1. **[Thought]** Needs to query DuckDB, aggregate revenue by region, and ensure case-insensitivity for the `successful` status.
+2. **[Tool: `execute_duckdb_query`]** Executes:
+   ```sql
+   SELECT region, COALESCE(SUM(amount), 0) AS total_revenue
+   FROM transactions
+   WHERE LOWER(status) = 'successful'
+   GROUP BY region
+   ```
+3. **[Observation]** Retrieves aggregated JSON: EMEA, APAC, North America, and LATAM totals.
+4. **[Tool: `generate_chart`]** Formats the JSON payload and routes it to the Plotly rendering engine.
 
----
-
-## 🏗 Architecture
-
-Enterprise DataLens follows a **Medallion Architecture** compressed into a high-performance local execution model.
-
-```mermaid
-graph TD
-    A[Raw Data Stream] -->|Ingest & Validate| B(Great Expectations Gate)
-    B -->|Pass| C{Delta Lake Storage}
-    B -->|Fail| D[Quarantine / Alert]
-    C -->|Parquet + _delta_log| E[DuckDB Query Engine]
-    
-    subgraph "Semantic Layer (v4.0)"
-        F[Data Dictionary] -->|Embeddings| G[LanceDB Vector Store]
-        G <-->|RAG Lookup| H["Neural Engine (Phi-3)"]
-    end
-    
-    H -->|SQL Generation| E
-    E -->|Result Set| I[User Interface]
-```
+![Total Revenue by Region](assets/1.png)
 
 ---
 
-## ✨ Key Capabilities
+### Example 2: Enterprise Monthly Trends
 
-| Feature            | Technology           | Description |
-|--------------------|----------------------|-------------|
-| Temporal Querying  | delta-rs             | Query historical versions of data with zero duplication (Time Travel). |
-| Semantic Search    | LanceDB              | Vector-based schema discovery enabling fuzzy, natural-language queries. |
-| Schema Enforcement | Delta Lake           | Strict type-checking and metadata validation to prevent data corruption. |
-| Data Quality       | Great Expectations   | Automated validation gates preventing bad data from entering the lake. |
-| Compute Engine     | DuckDB               | In-process OLAP engine delivering sub-second analytics on Parquet. |
-| CI/CD Pipeline     | GitHub Actions       | Automated lakehouse builds and end-to-end query tests on every push. |
+**User Prompt:**
+> "Plot the monthly revenue trend for our 'Enterprise' category as a line chart."
+
+**Agent Chain of Thought:**
+
+1. **[Thought]** Needs to aggregate revenue by month specifically for the `Enterprise` category using `DATE_TRUNC`.
+2. **[Tool: `execute_duckdb_query`]** Executes:
+   ```sql
+   SELECT DATE_TRUNC('month', transaction_date) AS month,
+          COALESCE(SUM(amount), 0) AS total_revenue
+   FROM transactions
+   WHERE LOWER(category) = 'enterprise'
+   GROUP BY month
+   ORDER BY month;
+   ```
+3. **[Observation]** Extracts 3+ years of time-series data.
+4. **[Tool: `generate_chart`]** Configures the x-axis to the month interval and maps the revenue trend as a line chart.
+
+![Monthly Revenue Trend](assets/2.png)
+
 ---
 
-## 🚀 Getting Started
+## 🧠 System Architecture
 
-This project uses **uv** for fast dependency resolution and deterministic environments.
+| Layer | Technology |
+|---|---|
+| **Orchestrator** | LangChain (ReAct Agent) + Azure OpenAI (GPT-4o) |
+| **Compute / Storage** | DuckDB Lakehouse |
+| **Frontend** | Streamlit + Plotly |
+| **Environment** | Python 3.12 managed by `uv` |
+
+## 📂 Repository Structure
+
+```text
+datalens/
+├── .github/workflows/
+│   └── ci.yml             # GitHub Actions: Automated linting & build tests
+├── assets/                # Documentation assets (Architecture diagrams & screenshots)
+│   ├── 1.png              # Regional revenue breakdown demo
+│   └── 2.png              # Enterprise monthly trend demo
+├── agent_tools.py          # Core ReAct Tools: DuckDB, Python REPL, & Plotly
+├── app.py                  # Streamlit: The Agentic UI Layer
+├── build_lakehouse.py      # Data Engineering: Lakehouse schema & ETL logic
+├── run_agent.py            # CLI: Headless orchestrator for local testing
+├── seed_db.py              # Mock Data: 1,200-day synthetic transaction generator
+├── pyproject.toml          # uv: Deterministic project metadata & dependencies
+└── uv.lock                 # uv: Fully resolved dependency lockfile
+```
+---
+
+## 🛠️ Key Engineering Innovations
+
+### 1. Autonomous Self-Healing SQL
+
+LLMs frequently hallucinate schema names or stumble over database-specific syntax. The `execute_duckdb_query` tool feeds **DuckDB Parser Errors** and **Catalog Errors** directly back into the agent's observation loop. If the agent queries an invalid column or uses the wrong casing, it autonomously queries `information_schema`, corrects its logic, and executes successfully on the next turn.
+
+### 2. The Context Window "Circuit Breaker"
+
+A common failure state for LLM data agents is querying an entire table, returning 50,000 rows of JSON, and permanently hanging the application. DataLens implements a **hard physical limit** at the database connection layer (`fetchmany(101)`). If a query returns >100 rows, the tool intercepts the payload and instructs the LLM to rewrite the query using proper SQL aggregations (`SUM`, `AVG`, `DATE_TRUNC`).
+
+### 3. Safe Multi-Line String Parsing
+
+LLMs wrap arguments in unpredictable quoting formats (`"""`, `'''`, `"`, `'`). The agent's custom parsing engine intelligently strips multi-line and outer quotes without destroying internal SQL strings or Python string literals, ensuring complex `WHERE` clauses execute natively without parser errors.
+
+---
+
+## 💻 Getting Started
 
 ### Prerequisites
-
-- **Python 3.11+**
-- **uv** (recommended) or **pip**
-- **[Ollama](https://ollama.com/)** (running `phi3` or `llama3`) for local LLM inference
-
----
-
-## Installation
-
-Clone the repository:
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) installed globally (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+### 1. Clone & Setup
 
 ```bash
 git clone https://github.com/jrbickelh/enterprise-datalens.git
 cd enterprise-datalens
+
+# Sync dependencies and create the virtual environment
+uv sync
 ```
 
-Sync the environment:
+### 2. Environment Variables
+
+Copy the example environment file and add your Azure OpenAI credentials.
 
 ```bash
-uv sync --frozen --no-install-project --all-extras
+cp .env.example .env
 ```
 
-Build the Lakehouse and Semantic Index:
+### 3. Seed the Lakehouse
+
+Generate the local DuckDB database populated with **1,200 days** of synthetic enterprise transaction data.
 
 ```bash
-# Generate synthetic data, validate it, and build the Delta table
-uv run python build_lakehouse.py
-
-# Index schema metadata into the vector store
-uv run python semantic_indexer.py
+uv run python seed_db.py
 ```
 
----
+### 4. Launch the App
 
-## 🧠 Usage
+*To run the headless CLI orchestrator for terminal-based debugging:*
+```bash
+uv run python run_agent.py
+```
 
-### Interactive Mode (Neural Shell)
-
-Launch the conversational query engine:
+Run the interactive Streamlit UI:
 
 ```bash
-uv run python datalens_engine.py
-```
-
-Example prompts:
-
-- `Show me the total active transactions`
-- `What was the count of records for version 0?`
-- `show history`
-
----
-
-### Headless Mode (CI / Automation)
-
-Run a single query and exit—ideal for automated reporting or tests:
-
-```bash
-uv run python datalens_engine.py --sql "SELECT COUNT(*) FROM transactions"
+uv run streamlit run app.py
 ```
 
 ---
 
-## 🛡 Quality Assurance
+## 🧪 Continuous Integration
 
-Enterprise DataLens follows strict **DataOps and Lakehouse best practices**:
-
-- **Validation Gate**  
-  Every write is validated against  
-  `gx/expectations/banking_quality_suite.json`.
-
-- **Continuous Integration**  
-  The CI pipeline builds the environment from scratch, generates fresh data,
-  and runs an end-to-end smoke test on every commit.
-
-- **Deterministic Builds**  
-  `uv.lock` guarantees identical dependency resolution across local development
-  and CI environments.
+The repository is fully equipped with a **GitHub Actions** pipeline (`datalens-ci.yml`) that utilizes `uv` to instantly build the environment, verify the lockfile, and run **Ruff** linting to enforce PEP-8 standards and catch logical errors before deployment.
 
 ---
+## 👨‍💻 Author
+**Jordan Bickelhaupt**
 
-## 📂 Project Structure
-
-```text
-├── .github/workflows/   # CI/CD automation (GitHub Actions)
-├── gx/                  # Great Expectations data quality suites
-├── lancedb/             # (Ignored) local vector store
-├── lakehouse/           # (Ignored) Delta Lake storage (Parquet + logs)
-├── build_lakehouse.py   # Data generator & ingestion pipeline
-├── datalens_engine.py   # Main query engine & CLI
-├── semantic_indexer.py  # Vector embedding & indexing
-├── gx_config.py         # Data quality configuration
-└── uv.lock              # Immutable dependency manifest
-```
-
----
-
-## 📌 Summary
-
-**Enterprise DataLens v4.0** demonstrates how modern Lakehouse concepts—**ACID storage, time travel, semantic querying, and automated data quality**—can be combined into a **single, local-first analytics engine** suitable for enterprise-scale design discussions, experimentation, and CI-driven validation.
-
-
+Data Scientist & Engineer
+* [Connect on LinkedIn](https://www.linkedin.com/in/jrbickelh/)
+* [View Portfolio](https://github.com/jrbickelh)
