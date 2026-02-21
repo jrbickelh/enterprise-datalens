@@ -1,4 +1,3 @@
-import os
 import pandas as pd
 import numpy as np
 from deltalake import DeltaTable, write_deltalake
@@ -73,7 +72,7 @@ def initialize_duckdb_catalog():
         SELECT * FROM delta_scan('{LAKEHOUSE_PATH}')
     """)
     
-    print(f"✅ Serving Layer Online. View 'transactions' registered.")
+    print("✅ Serving Layer Online. View 'transactions' registered.")
     con.close()
 
 if __name__ == "__main__":
