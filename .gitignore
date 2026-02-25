@@ -39,3 +39,7 @@ embeddings/
 
 # --- Project Artifacts ---
 test_results/
+
+# Local Vector Database
+chroma_db/
+sqlite.db

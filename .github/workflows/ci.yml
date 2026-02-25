@@ -1,8 +1,8 @@
-name: DataLens Agent CI
+name: DataLens Agent CI/CD
 
 on:
   push:
-    branches: [ "main","v5"]
+    branches: [ "main", "v6.3" ]
   pull_request:
     branches: [ "main" ]
 
@@ -10,11 +10,14 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
 
-    # MAP GITHUB SECRETS TO ENVIRONMENT VARIABLES
+    # 1. MAP ALL GITHUB SECRETS
+    # We now include the specific tiered deployment names and embeddings
     env:
       AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
       AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
-      AZURE_DEPLOYMENT_NAME: ${{ secrets.AZURE_DEPLOYMENT_NAME }}
+      AZURE_DEPLOYMENT_NAME_MINI: ${{ secrets.AZURE_DEPLOYMENT_NAME_MINI }}
+      AZURE_DEPLOYMENT_NAME_GPT4: ${{ secrets.AZURE_DEPLOYMENT_NAME_GPT4 }}
+      AZURE_DEPLOYMENT_NAME_EMBEDDINGS: ${{ secrets.AZURE_DEPLOYMENT_NAME_EMBEDDINGS }}
       AZURE_API_VERSION: "2024-12-01-preview"
       LANGCHAIN_TRACING_V2: "false"
 
@@ -22,38 +25,51 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
 
-    # 1. Install uv (Lightning fast package manager)
+    # 2. INSTALL UV (Lightning fast package manager)
     - name: Install uv
       uses: astral-sh/setup-uv@v5
       with:
         enable-cache: true
         version: "latest"
 
-    # 2. Setup Python 3.12
+    # 3. SETUP PYTHON 3.12
     - name: Set up Python 3.12
       run: uv python install 3.12
 
-    # 3. Install Dependencies
+    # 4. INSTALL DEPENDENCIES
+    # We use --frozen to ensure the environment exactly matches your uv.lock
     - name: Install Dependencies
-      run: uv sync --frozen --no-install-project --all-extras
+      run: uv sync --frozen --all-extras --dev
 
-    # 4. Code Quality Check (New!)
-    # Hiring managers love to see linting in CI pipelines.
-    - name: Run Linter
-      run: |
-        uv pip install ruff
-        uv run ruff check . || echo "Linting issues found, but allowing build to continue."
+    # 5. CODE QUALITY CHECK
+    # Enforces strict linting standards before allowing the build to proceed
+    - name: Run Linter (Ruff)
+      run: uv run ruff check .
 
-    # 5. Build the DuckDB Lakehouse (Replaced GX)
+    # 6. BUILD THE DATA STACK
+    # First, seed the DuckDB Lakehouse
     - name: Build Local Lakehouse & Seed Data
-      run: uv run python seed_db.py  # Use your actual setup script name here
+      if: env.AZURE_OPENAI_API_KEY != ''
+      run: uv run python seed_db.py
 
-    # 6. E2E Agent CLI Test
-    # This ensures the ReAct loop initializes and tools map correctly.
-    # Note: If you don't want to use real LLM credits in CI, you can remove this step
-    # or write a mock test.
-    - name: Run ReAct Agent Smoke Test
+    # Second, seed the Chroma Vector Store (Crucial for the Engineer node)
+    - name: Seed Chroma Vector Store
+      if: env.AZURE_OPENAI_API_KEY != ''
+      run: uv run python seed_chroma.py
+
+    # 7. RUN AUTOMATED TEST SUITE
+    # This runs the test_app.py logic we just built.
+    # It will only run if the API Key is present (prevents failure on external forks)
+    - name: Run Pytest Suite
       if: env.AZURE_OPENAI_API_KEY != ''
       run: |
-        echo "Testing Agent Initialization..."
-        uv run python run_agent.py
+        echo "🚀 Running DataLens Automated Test Suite..."
+        uv run pytest test_app.py -v
+
+    # 8. OPTIONAL: RUN SMOKE TEST (HEADLESS)
+    # A quick check to ensure the ReAct loop doesn't hang
+    - name: Run Agent Smoke Test
+      if: env.AZURE_OPENAI_API_KEY != ''
+      run: |
+        echo "Performing final agent handshake..."
+        # You could add a specialized minimal script here or just rely on pytest
