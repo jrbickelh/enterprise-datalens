@@ -234,6 +234,50 @@ def search_golden_queries(search_term: str) -> str:
     return f"Observation: Found verified SQL patterns via hybrid search:\n{formatted_results}"
 
 
+@tool
+def suggest_joins(table_name: str) -> str:
+    """Suggest valid joins from a table based on semantic layer definitions.
+    Use this BEFORE writing multi-table queries to ensure joins are valid.
+
+    Args:
+        table_name: Name of the table (e.g., 'transactions', 'customers')
+
+    Returns:
+        List of valid join paths with descriptions
+    """
+    from semantic_layer import get_valid_joins, get_join_chains
+
+    joins = get_valid_joins()
+    chains = get_join_chains()
+
+    # Find joins involving this table
+    relevant_joins = []
+    for join_name, join_def in joins.items():
+        if join_def.get("from_table") == table_name and join_def.get("enabled", True):
+            target = join_def.get("to_table", "?")
+            condition = join_def.get("join_condition", "?")
+            desc = join_def.get("description", "")
+            relevant_joins.append(
+                f"  {table_name} → {target}: {condition} ({desc})"
+            )
+
+    if not relevant_joins:
+        return f"Observation: No valid joins found for '{table_name}'. Proceed with single-table queries."
+
+    result = f"Observation: Valid JOIN paths from '{table_name}':\n"
+    result += "\n".join(relevant_joins)
+
+    # Add multi-table chain recommendations
+    result += "\n\nRECOMMENDED MULTI-TABLE CHAINS:\n"
+    for chain_name, chain_def in chains.items():
+        chain = chain_def.get("chain", "")
+        if table_name in chain:
+            use_case = chain_def.get("use_case", "")
+            result += f"  {chain}: {use_case}\n"
+
+    return result
+
+
 # Final export for the agent
 # Complete tool list for reference
 tools = [
@@ -245,5 +289,5 @@ tools = [
     forecast_data,
 ]
 
-engineer_tools = [execute_duckdb_query, search_golden_queries, explore_schema]
+engineer_tools = [execute_duckdb_query, search_golden_queries, explore_schema, suggest_joins]
 scientist_tools = [generate_chart, detect_anomalies, forecast_data]

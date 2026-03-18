@@ -33,6 +33,12 @@ golden_queries = [
 
     # Performance Cohort (1 variant)
     "Top 10 Customers by Revenue (High-Value Cohort): SELECT transaction_id, product_name, region, SUM(amount) as lifetime_value FROM transactions GROUP BY transaction_id, product_name, region ORDER BY lifetime_value DESC LIMIT 10;",
+
+    # Multi-Table Queries (4 new patterns for v8.0)
+    "Customer Lifetime Value by Segment: SELECT c.customer_segment, SUM(t.amount) as total_lifetime_value, COUNT(DISTINCT c.customer_id) as customer_count FROM customers c LEFT JOIN transactions t ON c.customer_id = t.customer_id GROUP BY c.customer_segment ORDER BY total_lifetime_value DESC;",
+    "Regional Churn Analysis: SELECT r.region_name, SUM(CASE WHEN c.churn_flag = 1 THEN 1 ELSE 0 END) as churned_customers, COUNT(DISTINCT c.customer_id) as total_customers FROM regions r LEFT JOIN customers c ON r.region_id = c.region_id GROUP BY r.region_name ORDER BY churned_customers DESC;",
+    "Product Revenue with Margins: SELECT p.product_name, p.category, SUM(t.amount) as product_revenue, COUNT(t.transaction_id) as transaction_count FROM transactions t LEFT JOIN products p ON t.product_name = p.product_name GROUP BY p.product_name, p.category ORDER BY product_revenue DESC;",
+    "Top Customers by Region: SELECT r.region_name, c.customer_name, SUM(t.amount) as customer_region_revenue FROM regions r LEFT JOIN customers c ON r.region_id = c.region_id LEFT JOIN transactions t ON c.customer_id = t.customer_id GROUP BY r.region_name, c.customer_id, c.customer_name ORDER BY r.region_name, customer_region_revenue DESC;",
 ]
 
 

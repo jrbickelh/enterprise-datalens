@@ -60,7 +60,8 @@ class TestSchemaGraphConstruction:
             for u, v, d in G.edges(data=True)
             if d.get("edge_type") == "has_column"
         ]
-        assert len(has_col_edges) == 7  # 7 columns in transactions
+        # v8.0: Multi-table schema: transactions(7) + customers(7) + products(5) + regions(4) = 23
+        assert len(has_col_edges) == 23
 
 
 # ---------------------------------------------------------------------------

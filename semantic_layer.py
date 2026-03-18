@@ -151,3 +151,117 @@ def get_cached_semantic_context() -> str:
         _SEMANTIC_CONTEXT = get_semantic_context()
 
     return _SEMANTIC_CONTEXT
+
+
+def get_valid_joins() -> dict:
+    """
+    Get all valid join paths defined in semantic layer.
+
+    Returns:
+        Dictionary of join_name → join_definition
+    """
+    semantic = load_semantic_layer()
+    return semantic.get("join_paths", {})
+
+
+def get_join_condition(join_name: str) -> str:
+    """
+    Get the JOIN condition SQL for a specific join.
+
+    Args:
+        join_name: Name of the join (e.g., 'transactions_to_customers')
+
+    Returns:
+        JOIN condition string (e.g., 'transactions.customer_id = customers.customer_id')
+
+    Raises:
+        KeyError: If join not found
+    """
+    joins = get_valid_joins()
+    join_def = joins.get(join_name)
+
+    if not join_def:
+        raise KeyError(f"Join '{join_name}' not found in semantic layer")
+
+    # Support both simple join_condition and join_chain
+    if "join_condition" in join_def:
+        return join_def["join_condition"]
+    elif "join_chain" in join_def:
+        return " AND ".join(join_def["join_chain"])
+    else:
+        raise KeyError(f"Join '{join_name}' has no join_condition or join_chain")
+
+
+def validate_join(from_table: str, to_table: str) -> bool:
+    """
+    Validate if a join between two tables is allowed.
+
+    Args:
+        from_table: Source table name
+        to_table: Target table name
+
+    Returns:
+        True if join is defined and enabled, False otherwise
+    """
+    joins = get_valid_joins()
+
+    for join_name, join_def in joins.items():
+        if (
+            join_def.get("from_table") == from_table
+            and join_def.get("to_table") == to_table
+            and join_def.get("enabled", True)
+        ):
+            return True
+
+    return False
+
+
+def get_join_chains() -> dict:
+    """
+    Get valid multi-table join chains (e.g., fact → dim1 → dim2).
+
+    Returns:
+        Dictionary of chain_name → chain_definition
+    """
+    semantic = load_semantic_layer()
+    return semantic.get("join_chains", {})
+
+
+def get_join_chain_description(chain_name: str) -> str:
+    """
+    Get description and use case for a join chain.
+
+    Args:
+        chain_name: Name of the chain (e.g., 'fact_to_all_dimensions')
+
+    Returns:
+        Description string with use cases
+
+    Raises:
+        KeyError: If chain not found
+    """
+    chains = get_join_chains()
+    chain_def = chains.get(chain_name)
+
+    if not chain_def:
+        raise KeyError(f"Join chain '{chain_name}' not found")
+
+    return f"{chain_def['description']} | Use case: {chain_def['use_case']}"
+
+
+def get_multi_table_metrics() -> dict:
+    """
+    Get metrics that require multi-table joins.
+
+    Returns:
+        Dictionary of metric_name → metric_definition for multi-table metrics
+    """
+    semantic = load_semantic_layer()
+    metrics = semantic.get("metrics", {})
+
+    multi_table = {}
+    for metric_name, metric_def in metrics.items():
+        if "joins_required" in metric_def:
+            multi_table[metric_name] = metric_def
+
+    return multi_table

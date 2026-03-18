@@ -5,6 +5,8 @@
 tables:
   transactions:
     description: "Core transaction records with amount, date, and business dimensions"
+    grain: "fact"
+    row_count: "5000+"
     columns:
       transaction_id:
         type: "identifier"
@@ -20,12 +22,91 @@ tables:
         description: "Product sold in transaction"
       region:
         type: "dimension"
-        description: "Geographic region (EMEA, APAC, AMERICAS, etc.)"
+        description: "Geographic region (EMEA, APAC, AMERICAS, LATAM)"
+      customer_id:
+        type: "foreign_key"
+        description: "Customer who made the transaction (FK → customers.customer_id)"
+      status:
+        type: "dimension"
+        valid_values: ["Successful", "Pending", "Failed"]
+        description: "Transaction status"
+      category:
+        type: "dimension"
+        valid_values: ["Enterprise", "SMB", "Add-on", "Services"]
+        description: "Product category"
+
+  customers:
+    description: "Customer master data with demographics and metrics"
+    grain: "dimension"
+    row_count: "10000+"
+    columns:
       customer_id:
         type: "identifier"
-        description: "Customer who made the transaction"
+        description: "Unique customer identifier"
+      customer_name:
+        type: "dimension"
+        description: "Customer name or account name"
+      region_id:
+        type: "foreign_key"
+        description: "Customer's region (FK → regions.region_id)"
+      customer_segment:
+        type: "dimension"
+        valid_values: ["Enterprise", "Mid-Market", "SMB"]
+        description: "Customer tier based on annual contract value"
+      lifetime_value:
+        type: "metric_base"
+        description: "Total revenue from this customer over time"
+      churn_flag:
+        type: "dimension"
+        valid_values: [0, 1]
+        description: "1 if customer churned, 0 otherwise"
+      join_date:
+        type: "temporal"
+        description: "Date customer joined"
+
+  products:
+    description: "Product catalog with hierarchy and margins"
+    grain: "dimension"
+    row_count: "500+"
+    columns:
+      product_name:
+        type: "identifier"
+        description: "Product name (unique product SKU)"
+      product_id:
+        type: "identifier"
+        description: "Product ID (matches transactions.product_name)"
+      category:
+        type: "dimension"
+        valid_values: ["Enterprise", "SMB", "Add-on", "Services"]
+        description: "Product category"
+      gross_margin_pct:
+        type: "metric_base"
+        description: "Gross margin as percentage"
+      unit_price:
+        type: "metric_base"
+        description: "Base unit price"
+
+  regions:
+    description: "Geographic region hierarchy"
+    grain: "dimension"
+    row_count: "10+"
+    columns:
+      region_id:
+        type: "identifier"
+        description: "Region ID (EMEA, APAC, AMERICAS, LATAM)"
+      region_name:
+        type: "dimension"
+        description: "Full region name"
+      sales_tier:
+        type: "dimension"
+        valid_values: ["Tier-1", "Tier-2", "Tier-3"]
+        description: "Sales tier (investment level)"
+      manager_id:
+        type: "identifier"
+        description: "Sales manager responsible for region"
 
 metrics:
+  # Single-Table Metrics
   total_revenue:
     definition: "SUM(amount)"
     table: "transactions"
@@ -57,6 +138,56 @@ metrics:
     table: "transactions"
     description: "Upper bound for detecting statistical outliers (3-sigma rule)"
 
+  successful_revenue:
+    definition: "SUM(CASE WHEN status = 'Successful' THEN amount ELSE 0 END)"
+    table: "transactions"
+    description: "Revenue from successful transactions only"
+
+  # Multi-Table Metrics
+  customer_lifetime_value:
+    definition: "SUM(t.amount)"
+    table: "transactions"
+    joins_required:
+      - "transactions → customers"
+    description: "Total revenue per customer (aggregate across all customer transactions)"
+    valid_dimensions:
+      - customer_segment
+      - region
+
+  customer_transaction_count:
+    definition: "COUNT(t.transaction_id)"
+    table: "transactions"
+    joins_required:
+      - "transactions → customers"
+    description: "Number of transactions per customer"
+    valid_dimensions:
+      - customer_segment
+
+  regional_revenue:
+    definition: "SUM(t.amount)"
+    table: "transactions"
+    joins_required:
+      - "transactions → customers → regions"
+    description: "Revenue by geographic region (via customer)"
+    valid_dimensions:
+      - sales_tier
+
+  churn_rate:
+    definition: "SUM(c.churn_flag) / COUNT(DISTINCT c.customer_id)"
+    table: "customers"
+    description: "Percentage of customers who churned (0-1 range)"
+    valid_dimensions:
+      - customer_segment
+
+  product_revenue:
+    definition: "SUM(t.amount)"
+    table: "transactions"
+    joins_required:
+      - "transactions ← products"
+    description: "Revenue per product (with margin analysis)"
+    valid_dimensions:
+      - category
+
 dimensions:
   product_name:
     table: "transactions"
@@ -79,13 +210,63 @@ dimensions:
       - year: "DATE_TRUNC('year', transaction_date)"
 
 join_paths:
-  # Transactions are the core table; define any future joins here
-  # Example (for future use):
-  # transactions_to_customers:
-  #   from_table: "transactions"
-  #   to_table: "customers"
-  #   join_condition: "transactions.customer_id = customers.customer_id"
-  #   join_type: "LEFT JOIN"
+  # Verified join definitions for multi-table analytics
+  # Format: from_table → to_table via join_key
+
+  transactions_to_customers:
+    from_table: "transactions"
+    to_table: "customers"
+    join_condition: "transactions.customer_id = customers.customer_id"
+    join_type: "LEFT JOIN"
+    cardinality: "many-to-one"
+    description: "Each transaction belongs to one customer"
+    enabled: true
+
+  customers_to_regions:
+    from_table: "customers"
+    to_table: "regions"
+    join_condition: "customers.region_id = regions.region_id"
+    join_type: "LEFT JOIN"
+    cardinality: "many-to-one"
+    description: "Each customer is assigned to one region"
+    enabled: true
+
+  transactions_to_regions_via_customers:
+    from_table: "transactions"
+    to_table: "regions"
+    join_chain:
+      - "transactions → customers (customer_id = customer_id)"
+      - "customers → regions (region_id = region_id)"
+    join_type: "LEFT JOIN"
+    cardinality: "many-to-one"
+    description: "Multi-hop join: get region data for transactions via customer"
+    enabled: true
+
+  transactions_to_products:
+    from_table: "transactions"
+    to_table: "products"
+    join_condition: "transactions.product_name = products.product_name"
+    join_type: "LEFT JOIN"
+    cardinality: "many-to-one"
+    description: "Each transaction references one product"
+    enabled: true
+
+# Valid join chains (define safe multi-table paths)
+join_chains:
+  fact_to_all_dimensions:
+    chain: "transactions → customers → regions"
+    description: "Fact table enriched with customer and region dimensions"
+    use_case: "Customer lifetime value by region, regional churn analysis"
+
+  fact_with_product:
+    chain: "transactions → products"
+    description: "Fact table enriched with product margins and pricing"
+    use_case: "Product revenue analysis with margin calculations"
+
+  customer_regional_cohort:
+    chain: "customers → regions"
+    description: "Customer segments grouped by geographic region"
+    use_case: "Regional market analysis, customer distribution by tier"
 
 constraints:
   # SQL syntax rules
@@ -94,6 +275,7 @@ constraints:
   filtering: "Apply WHERE clauses BEFORE aggregation in GROUP BY queries."
 
 common_patterns:
+  # Single-Table Patterns
   monthly_aggregation: |
     SELECT DATE_TRUNC('month', transaction_date) as month, SUM(amount) as total_revenue
     FROM transactions
@@ -117,3 +299,52 @@ common_patterns:
     FROM transactions
     GROUP BY region
     ORDER BY total_revenue DESC;
+
+  # Multi-Table Patterns
+  customer_lifetime_value: |
+    SELECT c.customer_id, c.customer_name, c.customer_segment,
+           SUM(t.amount) as lifetime_value, COUNT(t.transaction_id) as transaction_count
+    FROM customers c
+    LEFT JOIN transactions t ON c.customer_id = t.customer_id
+    GROUP BY c.customer_id, c.customer_name, c.customer_segment
+    ORDER BY lifetime_value DESC;
+
+  customer_lifetime_value_by_region: |
+    SELECT r.region_name, c.customer_segment,
+           SUM(t.amount) as total_revenue, COUNT(DISTINCT c.customer_id) as customer_count
+    FROM regions r
+    LEFT JOIN customers c ON r.region_id = c.region_id
+    LEFT JOIN transactions t ON c.customer_id = t.customer_id
+    GROUP BY r.region_name, c.customer_segment
+    ORDER BY total_revenue DESC;
+
+  regional_churn_analysis: |
+    SELECT r.region_name, r.sales_tier,
+           SUM(CASE WHEN c.churn_flag = 1 THEN 1 ELSE 0 END) as churned_customers,
+           COUNT(DISTINCT c.customer_id) as total_customers,
+           ROUND(SUM(CASE WHEN c.churn_flag = 1 THEN 1 ELSE 0 END)::DECIMAL /
+                 COUNT(DISTINCT c.customer_id), 4) as churn_rate
+    FROM regions r
+    LEFT JOIN customers c ON r.region_id = c.region_id
+    GROUP BY r.region_name, r.sales_tier
+    ORDER BY churn_rate DESC;
+
+  product_revenue_with_margins: |
+    SELECT p.product_name, p.category, p.gross_margin_pct,
+           SUM(t.amount) as product_revenue,
+           COUNT(t.transaction_id) as transaction_count,
+           AVG(t.amount) as avg_transaction_value
+    FROM transactions t
+    LEFT JOIN products p ON t.product_name = p.product_name
+    GROUP BY p.product_name, p.category, p.gross_margin_pct
+    ORDER BY product_revenue DESC;
+
+  top_customers_by_region: |
+    SELECT r.region_name, c.customer_name, c.customer_segment,
+           SUM(t.amount) as customer_revenue, COUNT(t.transaction_id) as transaction_count
+    FROM regions r
+    LEFT JOIN customers c ON r.region_id = c.region_id
+    LEFT JOIN transactions t ON c.customer_id = t.customer_id
+    GROUP BY r.region_name, c.customer_id, c.customer_name, c.customer_segment
+    ORDER BY r.region_name, customer_revenue DESC
+    LIMIT 100;

@@ -144,14 +144,31 @@ def engineer_node(state: AgentState) -> dict:
 
         {semantic_context}
 
-        CRITICAL RULES:
+        CRITICAL RULES FOR SINGLE-TABLE QUERIES:
         1. BEFORE writing complex queries, use `search_golden_queries` to find verified enterprise SQL patterns.
-        2. Use `explore_schema` to inspect table structure, column roles (dimension/metric/identifier), and valid join paths before writing multi-table queries.
+        2. Use `explore_schema` to inspect table structure, column roles (dimension/metric/identifier).
         3. Only write queries that match the exact tables and columns in the schema.
         4. Reference the SEMANTIC LAYER metrics and dimensions by name when possible (e.g., total_revenue, product_name).
         5. If the database returns an error, YOU MUST REWRITE THE QUERY AND TRY AGAIN using the error feedback.
-        6. Provide the final retrieved data to the Supervisor as a RAW JSON ARRAY so the Scientist can easily ingest it. Do not format it as a text list.
 
+        CRITICAL RULES FOR MULTI-TABLE QUERIES:
+        1. ALWAYS use `suggest_joins` FIRST to identify valid join paths. Example: suggest_joins('transactions')
+        2. ONLY use joins that are explicitly approved by suggest_joins output.
+        3. Follow the recommended multi-table chains to avoid circular references.
+        4. Validate join cardinality (many-to-one) before executing to prevent cartesian products.
+        5. Use LEFT JOIN for fact-to-dimension joins to preserve all rows from the fact table.
+
+        MULTI-TABLE EXAMPLE (Customer Lifetime Value):
+           Step 1: suggest_joins('transactions') → learn about valid joins
+           Step 2: Write: SELECT c.customer_id, c.customer_segment,
+                         SUM(t.amount) as lifetime_value
+                  FROM customers c
+                  LEFT JOIN transactions t ON c.customer_id = t.customer_id
+                  GROUP BY c.customer_id, c.customer_segment
+
+        OUTPUT FORMAT:
+        - Provide the final retrieved data as a RAW JSON ARRAY (not formatted text).
+        - Example: [{{'customer_id': 'CUST-10000', 'lifetime_value': 5000.00}}, ...]
         """,
     )
     result = agent.invoke(

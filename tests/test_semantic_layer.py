@@ -160,7 +160,10 @@ class TestCommonPatterns:
 
     def test_patterns_contain_sql_keywords(self):
         data = load_semantic_layer()
+        valid_tables = ["transactions", "customers", "products", "regions"]
         for name, pattern in data["common_patterns"].items():
             assert "SELECT" in pattern, f"Pattern '{name}' missing SELECT"
             assert "FROM" in pattern, f"Pattern '{name}' missing FROM"
-            assert "transactions" in pattern, f"Pattern '{name}' missing table ref"
+            # Check that pattern references at least one valid table
+            has_table = any(table in pattern for table in valid_tables)
+            assert has_table, f"Pattern '{name}' missing valid table reference"
