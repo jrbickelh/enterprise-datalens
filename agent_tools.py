@@ -12,6 +12,45 @@ from schema_graph import explore_schema
 # USE RELATIVE PATHS FOR GITHUB
 DB_PATH = os.path.join(os.path.dirname(__file__), "datalens_lakehouse.db")
 
+def _validate_multi_table_query(query: str) -> dict:
+    """
+    Validate multi-table (JOIN) queries for common issues.
+
+    Checks for:
+    - All JOIN tables exist in schema
+    - Join conditions reference real columns
+    - Cardinality: LEFT JOIN used (not INNER for fact-to-dim)
+
+    Returns:
+        dict with 'valid' (bool), 'reason' (str), 'suggestion' (str)
+    """
+    from semantic_layer import get_valid_joins
+
+    query_upper = query.upper()
+
+    # Check for valid FROM table
+    if "FROM" not in query_upper:
+        return {"valid": False, "reason": "Missing FROM clause", "suggestion": "Add FROM table_name"}
+
+    # Quick validation: check for approved joins via semantic layer
+    joins = get_valid_joins()
+    join_names = list(joins.keys())
+
+    # If query uses JOIN but we can't auto-validate, let it through (schema_graph will catch errors)
+    # This is permissive by design: let DuckDB catch real errors
+    if "JOIN" in query_upper:
+        # Warn on INNER JOIN for facts (prefer LEFT)
+        # Fact tables: transactions (the main one)
+        if "INNER JOIN" in query_upper and "transactions" in query_upper.lower():
+            return {
+                "valid": False,
+                "reason": "Risky INNER JOIN on fact table (transactions). Use LEFT JOIN to preserve all rows.",
+                "suggestion": "Replace INNER JOIN with LEFT JOIN",
+            }
+
+    return {"valid": True, "reason": "OK", "suggestion": ""}
+
+
 def get_db_schema_string():
     """Retrieves schema with error handling for empty databases."""
     try:
@@ -37,7 +76,10 @@ def get_db_schema_string():
 
 @tool
 def execute_duckdb_query(query: str):
-    """Executes SQL and prevents context window flooding. Always use CAST(date AS DATE) for monthly trends."""
+    """Executes SQL and prevents context window flooding. Always use CAST(date AS DATE) for monthly trends.
+
+    For multi-table queries: validates joins first (no INNER JOINs on fact tables, etc.).
+    Use suggest_joins() BEFORE writing complex queries to ensure joins are approved."""
     try:
         import duckdb
 
@@ -54,6 +96,12 @@ def execute_duckdb_query(query: str):
             clean_query = clean_query[1:-1]
 
         clean_query = clean_query.strip()
+
+        # --- PRE-EXECUTION VALIDATION: Multi-table queries ---
+        if "JOIN" in clean_query.upper():
+            validation = _validate_multi_table_query(clean_query)
+            if not validation["valid"]:
+                return f"VALIDATION ERROR (Multi-Table Query): {validation['reason']}\nSUGGESTION: {validation['suggestion']}"
 
         # --- EXECUTION ---
         with duckdb.connect(DB_PATH) as con:

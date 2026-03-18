@@ -144,31 +144,85 @@ def engineer_node(state: AgentState) -> dict:
 
         {semantic_context}
 
-        CRITICAL RULES FOR SINGLE-TABLE QUERIES:
-        1. BEFORE writing complex queries, use `search_golden_queries` to find verified enterprise SQL patterns.
-        2. Use `explore_schema` to inspect table structure, column roles (dimension/metric/identifier).
-        3. Only write queries that match the exact tables and columns in the schema.
-        4. Reference the SEMANTIC LAYER metrics and dimensions by name when possible (e.g., total_revenue, product_name).
-        5. If the database returns an error, YOU MUST REWRITE THE QUERY AND TRY AGAIN using the error feedback.
+        ═══════════════════════════════════════════════════════════════
+        DECISION TREE: Single-Table vs Multi-Table Query
+        ═══════════════════════════════════════════════════════════════
 
-        CRITICAL RULES FOR MULTI-TABLE QUERIES:
-        1. ALWAYS use `suggest_joins` FIRST to identify valid join paths. Example: suggest_joins('transactions')
-        2. ONLY use joins that are explicitly approved by suggest_joins output.
-        3. Follow the recommended multi-table chains to avoid circular references.
-        4. Validate join cardinality (many-to-one) before executing to prevent cartesian products.
-        5. Use LEFT JOIN for fact-to-dimension joins to preserve all rows from the fact table.
+        IF user asks for a SINGLE metric from ONE table (e.g., "total revenue"):
+          → Use single-table rules (below)
 
-        MULTI-TABLE EXAMPLE (Customer Lifetime Value):
-           Step 1: suggest_joins('transactions') → learn about valid joins
-           Step 2: Write: SELECT c.customer_id, c.customer_segment,
-                         SUM(t.amount) as lifetime_value
-                  FROM customers c
-                  LEFT JOIN transactions t ON c.customer_id = t.customer_id
-                  GROUP BY c.customer_id, c.customer_segment
+        IF user asks for a METRIC ACROSS RELATED TABLES (e.g., "customer lifetime value", "regional churn"):
+          → Use multi-table rules (below)
 
-        OUTPUT FORMAT:
-        - Provide the final retrieved data as a RAW JSON ARRAY (not formatted text).
-        - Example: [{{'customer_id': 'CUST-10000', 'lifetime_value': 5000.00}}, ...]
+        IF you're unsure:
+          → Use search_golden_queries FIRST (covers both single and multi-table patterns)
+
+        ═══════════════════════════════════════════════════════════════
+        SINGLE-TABLE QUERY RULES
+        ═══════════════════════════════════════════════════════════════
+
+        1. Use `search_golden_queries` to find verified patterns FIRST
+        2. Use `explore_schema` to inspect column roles (dimension/metric/identifier)
+        3. Reference SEMANTIC LAYER metrics and dimensions by name
+        4. If error occurs, rewrite using feedback from execute_duckdb_query
+
+        ═══════════════════════════════════════════════════════════════
+        MULTI-TABLE QUERY RULES (Required for cross-table analysis)
+        ═══════════════════════════════════════════════════════════════
+
+        STEP 1: Detect if multi-table is needed
+          - Question mentions customer, region, product data → multi-table likely
+          - Keywords: "by region", "by customer", "lifetime value", "churn", "segments"
+
+        STEP 2: Get approved joins
+          - Call suggest_joins(primary_table) to see valid paths
+          - Example: If about customers → suggest_joins('customers')
+
+        STEP 3: Build query following semantic layer chains
+          - Use ONLY joins explicitly listed in suggest_joins output
+          - Follow "RECOMMENDED MULTI-TABLE CHAINS" from suggest_joins
+          - Example chain: transactions → customers → regions
+
+        STEP 4: Join validation rules
+          - ALWAYS use LEFT JOIN (preserve all fact rows)
+          - Never INNER JOIN fact tables (data loss)
+          - Fact table goes in FROM, dimensions in JOIN
+          - Join condition must be explicit (no fuzzy matching)
+
+        STEP 5: Execute and validate
+          - Call execute_duckdb_query with your multi-table SQL
+          - If validation error, use suggest_joins again to verify path
+          - If data error (e.g., circular reference), try alternative chain
+
+        ═══════════════════════════════════════════════════════════════
+        MULTI-TABLE EXAMPLE WORKFLOW
+        ═══════════════════════════════════════════════════════════════
+
+        USER: "Show top 10 customers by lifetime value"
+
+        Step 1: Recognize → multi-table (customer + transaction data)
+        Step 2: suggest_joins('customers') → learn valid paths
+        Step 3: Output suggests: "transactions → customers → regions"
+        Step 4: Write query following this chain:
+
+          SELECT c.customer_id, c.customer_name, c.customer_segment,
+                 SUM(t.amount) as lifetime_value, COUNT(t.transaction_id) as transaction_count
+          FROM customers c
+          LEFT JOIN transactions t ON c.customer_id = t.customer_id
+          GROUP BY c.customer_id, c.customer_name, c.customer_segment
+          ORDER BY lifetime_value DESC
+          LIMIT 10;
+
+        Step 5: Call execute_duckdb_query with this SQL
+
+        ═══════════════════════════════════════════════════════════════
+        OUTPUT FORMAT
+        ═══════════════════════════════════════════════════════════════
+
+        Always return RAW JSON ARRAY, never formatted text:
+        [{{'customer_id': 'CUST-10000', 'lifetime_value': 500000}}, ...]
+
+        The Scientist will ingest this JSON for visualization and analysis.
         """,
     )
     result = agent.invoke(

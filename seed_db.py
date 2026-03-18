@@ -34,11 +34,12 @@ def generate_mock_data():
         len(products), NUM_RECORDS, p=[0.4, 0.25, 0.15, 0.1, 0.1]
     )
 
-    # 3. Build the DataFrame
+    # 3. Build the DataFrame (with customer_id for multi-table joins)
     df = pd.DataFrame(
         {
             "transaction_id": [f"TRX-{10000 + i}" for i in range(NUM_RECORDS)],
             "transaction_date": dates,
+            "customer_id": [f"CUST-{10000 + np.random.randint(0, 10000)}" for _ in range(NUM_RECORDS)],
             "product_name": [products[i][0] for i in chosen_products],
             "category": [products[i][1] for i in chosen_products],
             "region": np.random.choice(
