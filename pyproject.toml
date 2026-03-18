@@ -1,6 +1,6 @@
 [project]
 name = "datalens"
-version = "7.1.0"
+version = "8.0.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
