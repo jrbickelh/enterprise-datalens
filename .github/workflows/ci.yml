@@ -2,7 +2,7 @@ name: DataLens Agent CI/CD
 
 on:
   push:
-    branches: [ "main", "v6.3" ]
+    branches: [ "main", "v8.0" ]
   pull_request:
     branches: [ "main" ]
 

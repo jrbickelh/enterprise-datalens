@@ -33,8 +33,7 @@ def _validate_multi_table_query(query: str) -> dict:
         return {"valid": False, "reason": "Missing FROM clause", "suggestion": "Add FROM table_name"}
 
     # Quick validation: check for approved joins via semantic layer
-    joins = get_valid_joins()
-    join_names = list(joins.keys())
+    get_valid_joins()
 
     # If query uses JOIN but we can't auto-validate, let it through (schema_graph will catch errors)
     # This is permissive by design: let DuckDB catch real errors

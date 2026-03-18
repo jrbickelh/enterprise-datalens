@@ -5,8 +5,7 @@ These tests verify that the full agent pipeline works correctly,
 from user query through supervisor routing to worker execution.
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from langchain_core.messages import HumanMessage, AIMessage
 
 # Import agent components

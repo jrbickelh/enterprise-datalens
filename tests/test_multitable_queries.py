@@ -5,7 +5,6 @@ Tests verify that complex multi-table queries execute correctly
 against the v8.0 schema (transactions, customers, products, regions).
 """
 
-import pytest
 import duckdb
 from pathlib import Path
 

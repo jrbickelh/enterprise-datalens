@@ -21,18 +21,20 @@
 graph TD
     User((User)) -->|Natural Language| UI[Streamlit UI]
     UI --> Sup{Supervisor<br/>gpt-4o-mini}
-    
+
     Sup -->|SQL/Extraction| Eng[🛠️ Engineer<br/>gpt-4o]
     Sup -->|ML/Visualization| Sci[🔬 Scientist<br/>gpt-4o]
-    
-    Eng <-->|Semantic RAG| Chroma[(ChromaDB)]
+
+    Eng <-->|Hybrid RAG| HR[BM25 + ChromaDB<br/>Reciprocal Rank Fusion]
     Eng <-->|Query & Self-Heal| DuckDB[(DuckDB)]
-    
+    Eng <-->|Metrics & Joins| SL[Semantic Layer<br/>YAML]
+    Eng <-->|Schema Intelligence| KG[Knowledge Graph<br/>NetworkX]
+
     Sci <-->|Scikit-Learn/Plotly| Py[[Python Sandbox]]
-    
+
     Eng -->|JSON Payload| Sup
     Sci -->|Charts/Metrics| Sup
-    
+
     Sup -->|Shadow Audit| UI
 ```
 ---
@@ -310,5 +312,5 @@ uv run pytest --cov=. tests/ test_app.py
 
 **Jordan Bickelhaupt** — Senior Data Scientist & GenAI Specialist
 
-- [Connect on LinkedIn](https://www.linkedin.com/in/jrbickelhaupt)
-- [View Portfolio](https://jrbickelhaupt.github.io)
+- [Connect on LinkedIn](https://www.linkedin.com/in/jrbickelh)
+- [View Portfolio](https://jrbickelh.github.io)

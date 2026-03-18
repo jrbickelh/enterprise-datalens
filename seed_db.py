@@ -65,7 +65,7 @@ def generate_mock_data():
 
 def generate_customers_dimension():
     """Generate 10K customer records with demographic and churn data."""
-    print(f"🧬 Generating 10K customer dimension records...")
+    print("🧬 Generating 10K customer dimension records...")
     np.random.seed(42)
 
     customer_ids = [f"CUST-{10000 + i}" for i in range(10000)]
@@ -95,7 +95,7 @@ def generate_customers_dimension():
 
 def generate_products_dimension():
     """Generate 50 product records with pricing and margins."""
-    print(f"🧬 Generating 50 product records...")
+    print("🧬 Generating 50 product records...")
     np.random.seed(42)
 
     product_names = [
@@ -131,7 +131,7 @@ def generate_products_dimension():
 
 def generate_regions_dimension():
     """Generate 4 region records with sales tiers."""
-    print(f"🧬 Generating 4 region records...")
+    print("🧬 Generating 4 region records...")
 
     return pd.DataFrame(
         {
@@ -187,7 +187,7 @@ def seed_database():
         print(f"✅ {count_reg} region records inserted.")
 
         print(
-            f"\n✅ Multi-table LakeHouse seeded: transactions, customers, products, regions"
+            "\n✅ Multi-table LakeHouse seeded: transactions, customers, products, regions"
         )
 
 

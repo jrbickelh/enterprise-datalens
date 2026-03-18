@@ -1,7 +1,7 @@
 [project]
 name = "datalens"
 version = "8.0.0"
-description = "Add your description here"
+description = "Autonomous multi-agent BI platform: LangGraph supervision, semantic layers, hybrid RAG search, and self-healing SQL"
 readme = "README.md"
 authors = [
     { name = "Jordan Bickelhaupt", email = "jrbickelh@gmail.com" }

@@ -43,3 +43,16 @@ test_results/
 # Local Vector Database
 chroma_db/
 sqlite.db
+
+# --- v8.5: Fine-Tuning Artifacts ---
+# Saves fine-tuned model adapters (large files, regeneratable)
+saves/
+# Fine-tuning training logs (large, regeneratable)
+events/
+runs/
+# Fine-tuned model checkpoints (large)
+checkpoints/
+# Fine-tuning dataset (regeneratable from code)
+finetune_dataset.jsonl
+# vLLM inference cache
+vllm_cache/
