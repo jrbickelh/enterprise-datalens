@@ -22,8 +22,8 @@ if "engine_mode" not in st.session_state:
 
 # 2. SIDEBAR & HARD STOP TOGGLE
 with st.sidebar:
-    st.title("🧬 DataLens v6.0")
-    st.subheader("Persistent Multi-Agent UI")
+    st.title("🧬 DataLens v7.1")
+    st.subheader("Autonomous Multi-Agent BI with 15+ Golden Queries & Cost Control")
     st.divider()
 
     if st.button("🗑️ Clear Conversation", use_container_width=True):

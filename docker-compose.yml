@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  datalens:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: datalens-app
+    ports:
+      - "8501:8501"
+    environment:
+      # Azure OpenAI Configuration
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT}
+      AZURE_DEPLOYMENT_NAME_MINI: ${AZURE_DEPLOYMENT_NAME_MINI:-gpt-4o-mini}
+      AZURE_DEPLOYMENT_NAME_GPT4: ${AZURE_DEPLOYMENT_NAME_GPT4:-gpt-4o}
+      AZURE_DEPLOYMENT_NAME_EMBEDDINGS: ${AZURE_DEPLOYMENT_NAME_EMBEDDINGS:-text-embedding-3-small}
+      AZURE_API_VERSION: ${AZURE_API_VERSION:-2024-12-01-preview}
+
+      # Observability (optional)
+      LANGFUSE_ENABLED: ${LANGFUSE_ENABLED:-false}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
+
+    volumes:
+      # Persist ChromaDB and DuckDB across container restarts
+      - datalens_data:/app/chroma_db
+      - datalens_data:/app/datalens_lakehouse.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  datalens_data:
+    driver: local

@@ -1,0 +1,119 @@
+# DataLens Semantic Layer Definition
+# This layer constrains LLM SQL generation to verified metrics, dimensions, and join paths
+# Version: v1.0
+
+tables:
+  transactions:
+    description: "Core transaction records with amount, date, and business dimensions"
+    columns:
+      transaction_id:
+        type: "identifier"
+        description: "Unique transaction identifier"
+      transaction_date:
+        type: "temporal"
+        description: "Date of transaction (use DATE_TRUNC for aggregation)"
+      amount:
+        type: "metric_base"
+        description: "Transaction amount in base currency"
+      product_name:
+        type: "dimension"
+        description: "Product sold in transaction"
+      region:
+        type: "dimension"
+        description: "Geographic region (EMEA, APAC, AMERICAS, etc.)"
+      customer_id:
+        type: "identifier"
+        description: "Customer who made the transaction"
+
+metrics:
+  total_revenue:
+    definition: "SUM(amount)"
+    table: "transactions"
+    description: "Total revenue across all transactions"
+    valid_dimensions:
+      - product_name
+      - region
+      - transaction_date
+
+  transaction_count:
+    definition: "COUNT(*)"
+    table: "transactions"
+    description: "Number of transactions"
+    valid_dimensions:
+      - product_name
+      - region
+      - transaction_date
+
+  average_transaction_value:
+    definition: "AVG(amount)"
+    table: "transactions"
+    description: "Mean transaction amount"
+    valid_dimensions:
+      - product_name
+      - region
+
+  anomaly_threshold:
+    definition: "AVG(amount) + (3 * STDDEV(amount))"
+    table: "transactions"
+    description: "Upper bound for detecting statistical outliers (3-sigma rule)"
+
+dimensions:
+  product_name:
+    table: "transactions"
+    description: "Product dimension for segmentation"
+    grain: "many"  # Many products per transaction possible
+
+  region:
+    table: "transactions"
+    valid_values: ["EMEA", "APAC", "AMERICAS"]
+    description: "Geographic region for market analysis"
+    grain: "one"  # One region per transaction
+
+  time_period:
+    table: "transactions"
+    base_column: "transaction_date"
+    supported_granularities:
+      - day: "DATE(transaction_date)"
+      - month: "DATE_TRUNC('month', transaction_date)"
+      - quarter: "DATE_TRUNC('quarter', transaction_date)"
+      - year: "DATE_TRUNC('year', transaction_date)"
+
+join_paths:
+  # Transactions are the core table; define any future joins here
+  # Example (for future use):
+  # transactions_to_customers:
+  #   from_table: "transactions"
+  #   to_table: "customers"
+  #   join_condition: "transactions.customer_id = customers.customer_id"
+  #   join_type: "LEFT JOIN"
+
+constraints:
+  # SQL syntax rules
+  date_handling: "Always use DATE_TRUNC() for month/quarter/year aggregation. Use DATE() for daily grain."
+  null_handling: "Exclude NULL values from aggregations unless explicitly required."
+  filtering: "Apply WHERE clauses BEFORE aggregation in GROUP BY queries."
+
+common_patterns:
+  monthly_aggregation: |
+    SELECT DATE_TRUNC('month', transaction_date) as month, SUM(amount) as total_revenue
+    FROM transactions
+    GROUP BY DATE_TRUNC('month', transaction_date)
+    ORDER BY month DESC;
+
+  segment_breakdown: |
+    SELECT product_name, SUM(amount) as total_revenue, COUNT(*) as transaction_count
+    FROM transactions
+    WHERE transaction_date >= {start_date}
+    GROUP BY product_name
+    ORDER BY total_revenue DESC;
+
+  anomaly_detection: |
+    SELECT *
+    FROM transactions
+    WHERE amount > (SELECT AVG(amount) + (3 * STDDEV(amount)) FROM transactions);
+
+  regional_comparison: |
+    SELECT region, SUM(amount) as total_revenue, AVG(amount) as avg_transaction
+    FROM transactions
+    GROUP BY region
+    ORDER BY total_revenue DESC;

@@ -64,7 +64,7 @@ jobs:
       if: env.AZURE_OPENAI_API_KEY != ''
       run: |
         echo "🚀 Running DataLens Automated Test Suite..."
-        uv run pytest test_app.py -v
+        uv run pytest tests/ test_app.py -v
 
     # 8. OPTIONAL: RUN SMOKE TEST (HEADLESS)
     # A quick check to ensure the ReAct loop doesn't hang

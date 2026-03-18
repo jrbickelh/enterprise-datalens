@@ -5,11 +5,9 @@ import numpy as np
 import plotly.express as px
 import plotly.io as pio
 from langchain_core.tools import tool
-from langchain_experimental.utilities import PythonREPL
 from sklearn.linear_model import LinearRegression
 import os
-from langchain_chroma import Chroma
-from langchain_openai import AzureOpenAIEmbeddings
+from schema_graph import explore_schema
 
 # USE RELATIVE PATHS FOR GITHUB
 DB_PATH = os.path.join(os.path.dirname(__file__), "datalens_lakehouse.db")
@@ -78,29 +76,6 @@ def execute_duckdb_query(query: str):
             "INSTRUCTION: Do not apologize. Analyze the error (e.g., check column names or syntax), "
             "correct the SQL query, and call execute_duckdb_query again."
         )
-
-
-# Persistent REPL instance for the tool
-python_repl = PythonREPL()
-
-
-@tool
-def python_analyst(code: str):
-    """Executes python code and captures stdout. Use print() to see results."""
-    clean_code = code.strip()
-
-    # THE FIX: Safely un-quote and unescape newlines for execution
-    if clean_code.startswith('"') and clean_code.endswith('"'):
-        clean_code = clean_code[1:-1].replace("\\n", "\n")
-    elif clean_code.startswith("'") and clean_code.endswith("'"):
-        clean_code = clean_code[1:-1].replace("\\n", "\n")
-
-    result = python_repl.run(clean_code)
-    return (
-        result
-        if result.strip()
-        else "Success (but no output was printed. Use print() to see results)."
-    )
 
 
 @tool
@@ -197,7 +172,8 @@ def forecast_data(data_json: str, periods: int = 3) -> str:
     'periods' is the number of future intervals to forecast.
     """
     try:
-        df = pd.read_json(data_json)
+        from io import StringIO
+        df = pd.read_json(StringIO(data_json))
         df["ds"] = pd.to_datetime(df["ds"])
         df = df.sort_values("ds")
 
@@ -234,21 +210,18 @@ def forecast_data(data_json: str, periods: int = 3) -> str:
 
 @tool
 def search_golden_queries(search_term: str) -> str:
-    """Search the vector database for 'Golden SQL Queries' matching the user's request.
+    """Search golden SQL queries using hybrid search (BM25 + vector similarity).
+    Combines keyword matching with semantic similarity for better recall.
     Use this tool FIRST if you are unsure about exact SQL syntax or table schemas."""
 
-    embeddings = AzureOpenAIEmbeddings(
-        azure_deployment=os.getenv("AZURE_DEPLOYMENT_NAME_EMBEDDINGS"),
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        api_version=os.getenv("AZURE_API_VERSION"),
-    )
+    from hybrid_retriever import get_hybrid_retriever
+    from seed_chroma import golden_queries
 
-    # Connect to the local database we just built
-    vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
+    # Get hybrid retriever (BM25 + vector)
+    retriever = get_hybrid_retriever(golden_queries)
 
-    # Retrieve the top 2 most relevant queries
-    results = vectorstore.similarity_search(search_term, k=2)
+    # Retrieve the top results via hybrid search
+    results = retriever.invoke(search_term)
 
     if not results:
         return (
@@ -258,18 +231,19 @@ def search_golden_queries(search_term: str) -> str:
     formatted_results = "\n".join(
         [f"EXAMPLE {i + 1}: {res.page_content}" for i, res in enumerate(results)]
     )
-    return f"Observation: Found verified SQL patterns:\n{formatted_results}"
+    return f"Observation: Found verified SQL patterns via hybrid search:\n{formatted_results}"
 
 
 # Final export for the agent
-# Updated Tool List
+# Complete tool list for reference
 tools = [
     execute_duckdb_query,
-    python_analyst,
+    search_golden_queries,
+    explore_schema,
     generate_chart,
     detect_anomalies,
     forecast_data,
 ]
 
-engineer_tools = [execute_duckdb_query, search_golden_queries]
+engineer_tools = [execute_duckdb_query, search_golden_queries, explore_schema]
 scientist_tools = [generate_chart, detect_anomalies, forecast_data]

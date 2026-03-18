@@ -14,6 +14,8 @@ from langgraph.graph.message import add_messages
 from dotenv import load_dotenv
 from langgraph.prebuilt import create_react_agent
 from agent_tools import engineer_tools, scientist_tools, get_db_schema_string
+from semantic_layer import get_cached_semantic_context
+from schema_graph import get_graph_summary
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 load_dotenv()
 
@@ -26,7 +28,11 @@ class AgentState(TypedDict):
     next_node: str  # Dictates the 'Route'
 
 
-# 2. INITIALIZE LLM
+# 2. INITIALIZE LLM WITH RATE LIMITING
+# Rate limit config (optional, via environment variables)
+RATE_LIMIT_RPM = int(os.getenv("AZURE_RATE_LIMIT_RPM", "60"))  # Requests per minute
+COST_LIMIT_USD = float(os.getenv("AZURE_COST_LIMIT_USD", "10.0"))  # Per-session budget
+
 # TIER 1: The Supervisor (Fast, Cheap)
 llm_mini = AzureChatOpenAI(
     azure_deployment=os.getenv("AZURE_DEPLOYMENT_NAME_MINI"),
@@ -34,6 +40,7 @@ llm_mini = AzureChatOpenAI(
     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
     api_version=os.getenv("AZURE_API_VERSION"),
     temperature=0,
+    timeout=30,  # Prevent hanging requests
 )
 
 # TIER 2: The Workers (High-Reasoning, Powerful)
@@ -43,6 +50,7 @@ llm_gpt4 = AzureChatOpenAI(
     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
     api_version=os.getenv("AZURE_API_VERSION"),
     temperature=0,
+    timeout=30,  # Prevent hanging requests
 )
 
 
@@ -56,7 +64,7 @@ class Router(BaseModel):
 
 
 # 2. Update the Supervisor Node
-def supervisor_node(state: AgentState):
+def supervisor_node(state: AgentState) -> dict:
     """The Supervisor stays on the Mini model but uses strict routing logic."""
     schema = get_db_schema_string()
 
@@ -114,32 +122,15 @@ def create_worker_agent(llm, tools, system_prompt):
     # We use create_react_agent to give them reasoning power
     return create_react_agent(llm, tools, prompt=prompt)
 
-# --- Define the Engineer Node ---
-GOLDEN_QUERIES = """
---- GOLDEN SQL EXAMPLES ---
-Use these verified patterns when writing your queries:
-
-1. Time-Series Aggregation:
-SELECT DATE_TRUNC('month', transaction_date) as month, SUM(amount)
-FROM transactions GROUP BY 1 ORDER BY 1;
-
-2. Finding Top Performers:
-SELECT product_name, SUM(amount) as total_revenue
-FROM transactions GROUP BY product_name ORDER BY total_revenue DESC LIMIT 5;
-
-3. Safe Casting for Anomalies:
-SELECT * FROM transactions WHERE amount > (SELECT AVG(amount) + (3 * STDDEV(amount)) FROM transactions);
-
-4. Preparing Data for Forecasting (Scientist):
-SELECT CAST(transaction_date AS DATE) as ds, amount as y
-FROM transactions WHERE region = 'EMEA' ORDER BY ds ASC;
----------------------------
-"""
+# Note: Golden queries are now centralized in seed_chroma.py
+# and injected via hybrid_retriever.search_golden_queries()
 
 
-def engineer_node(state: AgentState):
+def engineer_node(state: AgentState) -> dict:
     """The Data Engineer Worker Node - Powered by GPT-4o"""
     schema = get_db_schema_string()
+    semantic_context = get_cached_semantic_context()
+    graph_summary = get_graph_summary()
 
     agent = create_react_agent(
         model=llm_gpt4,
@@ -149,11 +140,17 @@ def engineer_node(state: AgentState):
         DATABASE SCHEMA:
         {schema}
 
+        {graph_summary}
+
+        {semantic_context}
+
         CRITICAL RULES:
         1. BEFORE writing complex queries, use `search_golden_queries` to find verified enterprise SQL patterns.
-        2. Only write queries that match the exact tables and columns in the schema.
-        3. If the database returns an error, YOU MUST REWRITE THE QUERY AND TRY AGAIN using the error feedback.
-        4. Provide the final retrieved data to the Supervisor as a RAW JSON ARRAY so the Scientist can easily ingest it. Do not format it as a text list.
+        2. Use `explore_schema` to inspect table structure, column roles (dimension/metric/identifier), and valid join paths before writing multi-table queries.
+        3. Only write queries that match the exact tables and columns in the schema.
+        4. Reference the SEMANTIC LAYER metrics and dimensions by name when possible (e.g., total_revenue, product_name).
+        5. If the database returns an error, YOU MUST REWRITE THE QUERY AND TRY AGAIN using the error feedback.
+        6. Provide the final retrieved data to the Supervisor as a RAW JSON ARRAY so the Scientist can easily ingest it. Do not format it as a text list.
 
         """,
     )
@@ -166,9 +163,10 @@ def engineer_node(state: AgentState):
 
 
 # --- Define the Scientist Node ---
-def scientist_node(state: AgentState):
+def scientist_node(state: AgentState) -> dict:
     """The ML and Vis Worker Node - Powered by GPT-4o"""
     schema = get_db_schema_string()
+    semantic_context = get_cached_semantic_context()
 
     agent = create_react_agent(
         model=llm_gpt4,  # High-reasoning model
@@ -180,7 +178,7 @@ def scientist_node(state: AgentState):
             DATABASE SCHEMA:
             {schema}
 
-            {GOLDEN_QUERIES}
+            {semantic_context}
 
             ### OPERATIONAL GUIDELINES
 
