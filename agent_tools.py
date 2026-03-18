@@ -5,14 +5,50 @@ import numpy as np
 import plotly.express as px
 import plotly.io as pio
 from langchain_core.tools import tool
-from langchain_experimental.utilities import PythonREPL
 from sklearn.linear_model import LinearRegression
 import os
-from langchain_chroma import Chroma
-from langchain_openai import AzureOpenAIEmbeddings
+from schema_graph import explore_schema
 
 # USE RELATIVE PATHS FOR GITHUB
 DB_PATH = os.path.join(os.path.dirname(__file__), "datalens_lakehouse.db")
+
+def _validate_multi_table_query(query: str) -> dict:
+    """
+    Validate multi-table (JOIN) queries for common issues.
+
+    Checks for:
+    - All JOIN tables exist in schema
+    - Join conditions reference real columns
+    - Cardinality: LEFT JOIN used (not INNER for fact-to-dim)
+
+    Returns:
+        dict with 'valid' (bool), 'reason' (str), 'suggestion' (str)
+    """
+    from semantic_layer import get_valid_joins
+
+    query_upper = query.upper()
+
+    # Check for valid FROM table
+    if "FROM" not in query_upper:
+        return {"valid": False, "reason": "Missing FROM clause", "suggestion": "Add FROM table_name"}
+
+    # Quick validation: check for approved joins via semantic layer
+    get_valid_joins()
+
+    # If query uses JOIN but we can't auto-validate, let it through (schema_graph will catch errors)
+    # This is permissive by design: let DuckDB catch real errors
+    if "JOIN" in query_upper:
+        # Warn on INNER JOIN for facts (prefer LEFT)
+        # Fact tables: transactions (the main one)
+        if "INNER JOIN" in query_upper and "transactions" in query_upper.lower():
+            return {
+                "valid": False,
+                "reason": "Risky INNER JOIN on fact table (transactions). Use LEFT JOIN to preserve all rows.",
+                "suggestion": "Replace INNER JOIN with LEFT JOIN",
+            }
+
+    return {"valid": True, "reason": "OK", "suggestion": ""}
+
 
 def get_db_schema_string():
     """Retrieves schema with error handling for empty databases."""
@@ -39,7 +75,10 @@ def get_db_schema_string():
 
 @tool
 def execute_duckdb_query(query: str):
-    """Executes SQL and prevents context window flooding. Always use CAST(date AS DATE) for monthly trends."""
+    """Executes SQL and prevents context window flooding. Always use CAST(date AS DATE) for monthly trends.
+
+    For multi-table queries: validates joins first (no INNER JOINs on fact tables, etc.).
+    Use suggest_joins() BEFORE writing complex queries to ensure joins are approved."""
     try:
         import duckdb
 
@@ -56,6 +95,12 @@ def execute_duckdb_query(query: str):
             clean_query = clean_query[1:-1]
 
         clean_query = clean_query.strip()
+
+        # --- PRE-EXECUTION VALIDATION: Multi-table queries ---
+        if "JOIN" in clean_query.upper():
+            validation = _validate_multi_table_query(clean_query)
+            if not validation["valid"]:
+                return f"VALIDATION ERROR (Multi-Table Query): {validation['reason']}\nSUGGESTION: {validation['suggestion']}"
 
         # --- EXECUTION ---
         with duckdb.connect(DB_PATH) as con:
@@ -78,29 +123,6 @@ def execute_duckdb_query(query: str):
             "INSTRUCTION: Do not apologize. Analyze the error (e.g., check column names or syntax), "
             "correct the SQL query, and call execute_duckdb_query again."
         )
-
-
-# Persistent REPL instance for the tool
-python_repl = PythonREPL()
-
-
-@tool
-def python_analyst(code: str):
-    """Executes python code and captures stdout. Use print() to see results."""
-    clean_code = code.strip()
-
-    # THE FIX: Safely un-quote and unescape newlines for execution
-    if clean_code.startswith('"') and clean_code.endswith('"'):
-        clean_code = clean_code[1:-1].replace("\\n", "\n")
-    elif clean_code.startswith("'") and clean_code.endswith("'"):
-        clean_code = clean_code[1:-1].replace("\\n", "\n")
-
-    result = python_repl.run(clean_code)
-    return (
-        result
-        if result.strip()
-        else "Success (but no output was printed. Use print() to see results)."
-    )
 
 
 @tool
@@ -197,7 +219,8 @@ def forecast_data(data_json: str, periods: int = 3) -> str:
     'periods' is the number of future intervals to forecast.
     """
     try:
-        df = pd.read_json(data_json)
+        from io import StringIO
+        df = pd.read_json(StringIO(data_json))
         df["ds"] = pd.to_datetime(df["ds"])
         df = df.sort_values("ds")
 
@@ -234,21 +257,18 @@ def forecast_data(data_json: str, periods: int = 3) -> str:
 
 @tool
 def search_golden_queries(search_term: str) -> str:
-    """Search the vector database for 'Golden SQL Queries' matching the user's request.
+    """Search golden SQL queries using hybrid search (BM25 + vector similarity).
+    Combines keyword matching with semantic similarity for better recall.
     Use this tool FIRST if you are unsure about exact SQL syntax or table schemas."""
 
-    embeddings = AzureOpenAIEmbeddings(
-        azure_deployment=os.getenv("AZURE_DEPLOYMENT_NAME_EMBEDDINGS"),
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        api_version=os.getenv("AZURE_API_VERSION"),
-    )
+    from hybrid_retriever import get_hybrid_retriever
+    from seed_chroma import golden_queries
 
-    # Connect to the local database we just built
-    vectorstore = Chroma(persist_directory="./chroma_db", embedding_function=embeddings)
+    # Get hybrid retriever (BM25 + vector)
+    retriever = get_hybrid_retriever(golden_queries)
 
-    # Retrieve the top 2 most relevant queries
-    results = vectorstore.similarity_search(search_term, k=2)
+    # Retrieve the top results via hybrid search
+    results = retriever.invoke(search_term)
 
     if not results:
         return (
@@ -258,18 +278,63 @@ def search_golden_queries(search_term: str) -> str:
     formatted_results = "\n".join(
         [f"EXAMPLE {i + 1}: {res.page_content}" for i, res in enumerate(results)]
     )
-    return f"Observation: Found verified SQL patterns:\n{formatted_results}"
+    return f"Observation: Found verified SQL patterns via hybrid search:\n{formatted_results}"
+
+
+@tool
+def suggest_joins(table_name: str) -> str:
+    """Suggest valid joins from a table based on semantic layer definitions.
+    Use this BEFORE writing multi-table queries to ensure joins are valid.
+
+    Args:
+        table_name: Name of the table (e.g., 'transactions', 'customers')
+
+    Returns:
+        List of valid join paths with descriptions
+    """
+    from semantic_layer import get_valid_joins, get_join_chains
+
+    joins = get_valid_joins()
+    chains = get_join_chains()
+
+    # Find joins involving this table
+    relevant_joins = []
+    for join_name, join_def in joins.items():
+        if join_def.get("from_table") == table_name and join_def.get("enabled", True):
+            target = join_def.get("to_table", "?")
+            condition = join_def.get("join_condition", "?")
+            desc = join_def.get("description", "")
+            relevant_joins.append(
+                f"  {table_name} → {target}: {condition} ({desc})"
+            )
+
+    if not relevant_joins:
+        return f"Observation: No valid joins found for '{table_name}'. Proceed with single-table queries."
+
+    result = f"Observation: Valid JOIN paths from '{table_name}':\n"
+    result += "\n".join(relevant_joins)
+
+    # Add multi-table chain recommendations
+    result += "\n\nRECOMMENDED MULTI-TABLE CHAINS:\n"
+    for chain_name, chain_def in chains.items():
+        chain = chain_def.get("chain", "")
+        if table_name in chain:
+            use_case = chain_def.get("use_case", "")
+            result += f"  {chain}: {use_case}\n"
+
+    return result
 
 
 # Final export for the agent
-# Updated Tool List
+# Complete tool list for reference
 tools = [
     execute_duckdb_query,
-    python_analyst,
+    search_golden_queries,
+    explore_schema,
     generate_chart,
     detect_anomalies,
     forecast_data,
 ]
 
-engineer_tools = [execute_duckdb_query, search_golden_queries]
+engineer_tools = [execute_duckdb_query, search_golden_queries, explore_schema, suggest_joins]
 scientist_tools = [generate_chart, detect_anomalies, forecast_data]

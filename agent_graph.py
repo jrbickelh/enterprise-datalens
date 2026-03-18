@@ -14,6 +14,8 @@ from langgraph.graph.message import add_messages
 from dotenv import load_dotenv
 from langgraph.prebuilt import create_react_agent
 from agent_tools import engineer_tools, scientist_tools, get_db_schema_string
+from semantic_layer import get_cached_semantic_context
+from schema_graph import get_graph_summary
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 load_dotenv()
 
@@ -26,7 +28,11 @@ class AgentState(TypedDict):
     next_node: str  # Dictates the 'Route'
 
 
-# 2. INITIALIZE LLM
+# 2. INITIALIZE LLM WITH RATE LIMITING
+# Rate limit config (optional, via environment variables)
+RATE_LIMIT_RPM = int(os.getenv("AZURE_RATE_LIMIT_RPM", "60"))  # Requests per minute
+COST_LIMIT_USD = float(os.getenv("AZURE_COST_LIMIT_USD", "10.0"))  # Per-session budget
+
 # TIER 1: The Supervisor (Fast, Cheap)
 llm_mini = AzureChatOpenAI(
     azure_deployment=os.getenv("AZURE_DEPLOYMENT_NAME_MINI"),
@@ -34,6 +40,7 @@ llm_mini = AzureChatOpenAI(
     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
     api_version=os.getenv("AZURE_API_VERSION"),
     temperature=0,
+    timeout=30,  # Prevent hanging requests
 )
 
 # TIER 2: The Workers (High-Reasoning, Powerful)
@@ -43,6 +50,7 @@ llm_gpt4 = AzureChatOpenAI(
     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
     api_version=os.getenv("AZURE_API_VERSION"),
     temperature=0,
+    timeout=30,  # Prevent hanging requests
 )
 
 
@@ -56,7 +64,7 @@ class Router(BaseModel):
 
 
 # 2. Update the Supervisor Node
-def supervisor_node(state: AgentState):
+def supervisor_node(state: AgentState) -> dict:
     """The Supervisor stays on the Mini model but uses strict routing logic."""
     schema = get_db_schema_string()
 
@@ -114,32 +122,15 @@ def create_worker_agent(llm, tools, system_prompt):
     # We use create_react_agent to give them reasoning power
     return create_react_agent(llm, tools, prompt=prompt)
 
-# --- Define the Engineer Node ---
-GOLDEN_QUERIES = """
---- GOLDEN SQL EXAMPLES ---
-Use these verified patterns when writing your queries:
-
-1. Time-Series Aggregation:
-SELECT DATE_TRUNC('month', transaction_date) as month, SUM(amount)
-FROM transactions GROUP BY 1 ORDER BY 1;
-
-2. Finding Top Performers:
-SELECT product_name, SUM(amount) as total_revenue
-FROM transactions GROUP BY product_name ORDER BY total_revenue DESC LIMIT 5;
-
-3. Safe Casting for Anomalies:
-SELECT * FROM transactions WHERE amount > (SELECT AVG(amount) + (3 * STDDEV(amount)) FROM transactions);
-
-4. Preparing Data for Forecasting (Scientist):
-SELECT CAST(transaction_date AS DATE) as ds, amount as y
-FROM transactions WHERE region = 'EMEA' ORDER BY ds ASC;
----------------------------
-"""
+# Note: Golden queries are now centralized in seed_chroma.py
+# and injected via hybrid_retriever.search_golden_queries()
 
 
-def engineer_node(state: AgentState):
+def engineer_node(state: AgentState) -> dict:
     """The Data Engineer Worker Node - Powered by GPT-4o"""
     schema = get_db_schema_string()
+    semantic_context = get_cached_semantic_context()
+    graph_summary = get_graph_summary()
 
     agent = create_react_agent(
         model=llm_gpt4,
@@ -149,12 +140,89 @@ def engineer_node(state: AgentState):
         DATABASE SCHEMA:
         {schema}
 
-        CRITICAL RULES:
-        1. BEFORE writing complex queries, use `search_golden_queries` to find verified enterprise SQL patterns.
-        2. Only write queries that match the exact tables and columns in the schema.
-        3. If the database returns an error, YOU MUST REWRITE THE QUERY AND TRY AGAIN using the error feedback.
-        4. Provide the final retrieved data to the Supervisor as a RAW JSON ARRAY so the Scientist can easily ingest it. Do not format it as a text list.
+        {graph_summary}
 
+        {semantic_context}
+
+        ═══════════════════════════════════════════════════════════════
+        DECISION TREE: Single-Table vs Multi-Table Query
+        ═══════════════════════════════════════════════════════════════
+
+        IF user asks for a SINGLE metric from ONE table (e.g., "total revenue"):
+          → Use single-table rules (below)
+
+        IF user asks for a METRIC ACROSS RELATED TABLES (e.g., "customer lifetime value", "regional churn"):
+          → Use multi-table rules (below)
+
+        IF you're unsure:
+          → Use search_golden_queries FIRST (covers both single and multi-table patterns)
+
+        ═══════════════════════════════════════════════════════════════
+        SINGLE-TABLE QUERY RULES
+        ═══════════════════════════════════════════════════════════════
+
+        1. Use `search_golden_queries` to find verified patterns FIRST
+        2. Use `explore_schema` to inspect column roles (dimension/metric/identifier)
+        3. Reference SEMANTIC LAYER metrics and dimensions by name
+        4. If error occurs, rewrite using feedback from execute_duckdb_query
+
+        ═══════════════════════════════════════════════════════════════
+        MULTI-TABLE QUERY RULES (Required for cross-table analysis)
+        ═══════════════════════════════════════════════════════════════
+
+        STEP 1: Detect if multi-table is needed
+          - Question mentions customer, region, product data → multi-table likely
+          - Keywords: "by region", "by customer", "lifetime value", "churn", "segments"
+
+        STEP 2: Get approved joins
+          - Call suggest_joins(primary_table) to see valid paths
+          - Example: If about customers → suggest_joins('customers')
+
+        STEP 3: Build query following semantic layer chains
+          - Use ONLY joins explicitly listed in suggest_joins output
+          - Follow "RECOMMENDED MULTI-TABLE CHAINS" from suggest_joins
+          - Example chain: transactions → customers → regions
+
+        STEP 4: Join validation rules
+          - ALWAYS use LEFT JOIN (preserve all fact rows)
+          - Never INNER JOIN fact tables (data loss)
+          - Fact table goes in FROM, dimensions in JOIN
+          - Join condition must be explicit (no fuzzy matching)
+
+        STEP 5: Execute and validate
+          - Call execute_duckdb_query with your multi-table SQL
+          - If validation error, use suggest_joins again to verify path
+          - If data error (e.g., circular reference), try alternative chain
+
+        ═══════════════════════════════════════════════════════════════
+        MULTI-TABLE EXAMPLE WORKFLOW
+        ═══════════════════════════════════════════════════════════════
+
+        USER: "Show top 10 customers by lifetime value"
+
+        Step 1: Recognize → multi-table (customer + transaction data)
+        Step 2: suggest_joins('customers') → learn valid paths
+        Step 3: Output suggests: "transactions → customers → regions"
+        Step 4: Write query following this chain:
+
+          SELECT c.customer_id, c.customer_name, c.customer_segment,
+                 SUM(t.amount) as lifetime_value, COUNT(t.transaction_id) as transaction_count
+          FROM customers c
+          LEFT JOIN transactions t ON c.customer_id = t.customer_id
+          GROUP BY c.customer_id, c.customer_name, c.customer_segment
+          ORDER BY lifetime_value DESC
+          LIMIT 10;
+
+        Step 5: Call execute_duckdb_query with this SQL
+
+        ═══════════════════════════════════════════════════════════════
+        OUTPUT FORMAT
+        ═══════════════════════════════════════════════════════════════
+
+        Always return RAW JSON ARRAY, never formatted text:
+        [{{'customer_id': 'CUST-10000', 'lifetime_value': 500000}}, ...]
+
+        The Scientist will ingest this JSON for visualization and analysis.
         """,
     )
     result = agent.invoke(
@@ -166,9 +234,10 @@ def engineer_node(state: AgentState):
 
 
 # --- Define the Scientist Node ---
-def scientist_node(state: AgentState):
+def scientist_node(state: AgentState) -> dict:
     """The ML and Vis Worker Node - Powered by GPT-4o"""
     schema = get_db_schema_string()
+    semantic_context = get_cached_semantic_context()
 
     agent = create_react_agent(
         model=llm_gpt4,  # High-reasoning model
@@ -180,7 +249,7 @@ def scientist_node(state: AgentState):
             DATABASE SCHEMA:
             {schema}
 
-            {GOLDEN_QUERIES}
+            {semantic_context}
 
             ### OPERATIONAL GUIDELINES
 
